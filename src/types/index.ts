@@ -43,7 +43,17 @@ export interface Booking {
   notes?: string;
   createdAt: string;
   changeHistory?: BookingChange[];
+  settled?: boolean;
+  settledAt?: string;
+  settledAmount?: number;
 }
+
+export const COURT_PRICE_PER_HOUR: Record<CourtType, number> = {
+  standard: 50,
+  vip: 100,
+  training: 40,
+  competition: 150,
+};
 
 export interface Inspection {
   id: string;

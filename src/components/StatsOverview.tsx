@@ -18,7 +18,7 @@ import {
   AlertCircle,
   Users,
 } from 'lucide-preact';
-import { getTodayStr, getBookingProgressStatus } from '../lib/utils';
+import { getTodayStr, getBookingProgressStatus, getLowestCourtPrice } from '../lib/utils';
 import { getTodayRechargeAmount, getTodayConsumeAmount, getLowBalanceMemberCount } from '../lib/storage';
 
 interface StatsOverviewProps {
@@ -298,7 +298,7 @@ export function StatsOverview({ courts, bookings, inspections, members, transact
               <p className="text-2xl font-bold text-gray-900">{stats.lowBalanceCount}</p>
             </div>
           </div>
-          <p className="mt-3 text-xs text-gray-500">余额 ≤ 0 的活跃会员</p>
+          <p className="mt-3 text-xs text-gray-500">余额低于 ¥{getLowestCourtPrice()} 的活跃会员</p>
         </div>
       </div>
 

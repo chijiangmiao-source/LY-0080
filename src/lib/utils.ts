@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from 'clsx';
-import type { Booking, BookingProgressStatus } from '../types';
+import type { Booking, BookingProgressStatus, CourtType } from '../types';
+import { COURT_PRICE_PER_HOUR } from '../types';
 
 export function cn(...inputs: ClassValue[]) {
   return clsx(inputs);
@@ -83,4 +84,23 @@ export function getCurrentTimeStr(): string {
   const hours = String(now.getHours()).padStart(2, '0');
   const minutes = String(now.getMinutes()).padStart(2, '0');
   return `${hours}:${minutes}`;
+}
+
+export function getBookingDurationHours(startTime: string, endTime: string): number {
+  const [startHour, startMin] = startTime.split(':').map(Number);
+  const [endHour, endMin] = endTime.split(':').map(Number);
+  const startMinutes = startHour * 60 + startMin;
+  const endMinutes = endHour * 60 + endMin;
+  const diffMinutes = Math.max(0, endMinutes - startMinutes);
+  return diffMinutes / 60;
+}
+
+export function calculateBookingAmount(startTime: string, endTime: string, courtType: CourtType): number {
+  const hours = getBookingDurationHours(startTime, endTime);
+  const pricePerHour = COURT_PRICE_PER_HOUR[courtType] || 50;
+  return Math.round(hours * pricePerHour * 100) / 100;
+}
+
+export function getLowestCourtPrice(): number {
+  return Math.min(...Object.values(COURT_PRICE_PER_HOUR));
 }

@@ -9,8 +9,8 @@ import {
   INSPECTION_STATUS_LABEL,
   BOOKING_PROGRESS_STATUS_LABEL,
 } from '../types';
-import { formatDate, getBookingProgressStatus, getBookingProgressBadgeClass } from '../lib/utils';
-import { X, Lightbulb, Layers, CalendarClock, ChevronDown, ChevronUp, History } from 'lucide-preact';
+import { formatDate, getBookingProgressStatus, getBookingProgressBadgeClass, calculateBookingAmount } from '../lib/utils';
+import { X, Lightbulb, Layers, CalendarClock, ChevronDown, ChevronUp, History, CheckCircle, Banknote } from 'lucide-preact';
 
 interface CourtDrawerProps {
   open: boolean;
@@ -23,6 +23,7 @@ interface CourtDrawerProps {
   onAddInspection: () => void;
   onCancelBooking: (id: string) => void;
   onRescheduleBooking: (booking: Booking) => void;
+  onSettleBooking: (booking: Booking) => void;
 }
 
 export function CourtDrawer({
@@ -36,6 +37,7 @@ export function CourtDrawer({
   onAddInspection,
   onCancelBooking,
   onRescheduleBooking,
+  onSettleBooking,
 }: CourtDrawerProps) {
   if (!court) return null;
 
@@ -205,37 +207,62 @@ export function CourtDrawer({
                     const progressStatus = getBookingProgressStatus(booking);
                     const isExpanded = expandedBookingIds.has(booking.id);
                     const hasChanges = booking.changeHistory && booking.changeHistory.length > 0;
+                    const estimatedAmount = calculateBookingAmount(booking.startTime, booking.endTime, court.type);
+                    const displayAmount = booking.settledAmount ?? estimatedAmount;
                     return (
                       <div key={booking.id} className="border border-gray-100 rounded-md p-3">
                         <div className="flex justify-between items-start">
                           <div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <p className="text-sm font-medium text-gray-900">
                                 {booking.customerName}
                               </p>
                               <span className={`badge ${getBookingProgressBadgeClass(progressStatus)}`}>
                                 {BOOKING_PROGRESS_STATUS_LABEL[progressStatus]}
                               </span>
+                              {booking.settled ? (
+                                <span className="badge bg-green-100 text-green-700 inline-flex items-center gap-1">
+                                  <CheckCircle className="w-3 h-3" />
+                                  已结算 ¥{displayAmount.toFixed(2)}
+                                </span>
+                              ) : (
+                                <span className="badge bg-yellow-100 text-yellow-700">
+                                  待结算 ¥{displayAmount.toFixed(2)}
+                                </span>
+                              )}
                             </div>
                             <p className="text-xs text-gray-500 mt-0.5">
                               {booking.customerPhone}
                             </p>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              className={`text-xs ${court.bookingStatus === 'disabled' ? 'text-gray-400 cursor-not-allowed' : 'text-emerald-600 hover:text-emerald-700'}`}
-                              onClick={court.bookingStatus === 'disabled' ? undefined : () => onRescheduleBooking(booking)}
-                              disabled={court.bookingStatus === 'disabled'}
-                              title={court.bookingStatus === 'disabled' ? '该场地已停用，不可改约' : ''}
-                            >
-                              <CalendarClock className="w-3.5 h-3.5 inline" />
-                              改期
-                            </button>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {!booking.settled && (
+                              <button
+                                className={`text-xs ${court.bookingStatus === 'disabled' ? 'text-gray-400 cursor-not-allowed' : 'text-blue-600 hover:text-blue-700'}`}
+                                onClick={court.bookingStatus === 'disabled' ? undefined : () => onSettleBooking(booking)}
+                                disabled={court.bookingStatus === 'disabled'}
+                                title="结算并生成消费记录"
+                              >
+                                <Banknote className="w-3.5 h-3.5 inline" />
+                                结算
+                              </button>
+                            )}
+                            {!booking.settled && (
+                              <button
+                                className={`text-xs ${court.bookingStatus === 'disabled' ? 'text-gray-400 cursor-not-allowed' : 'text-emerald-600 hover:text-emerald-700'}`}
+                                onClick={court.bookingStatus === 'disabled' ? undefined : () => onRescheduleBooking(booking)}
+                                disabled={court.bookingStatus === 'disabled'}
+                                title={court.bookingStatus === 'disabled' ? '该场地已停用，不可改约' : ''}
+                              >
+                                <CalendarClock className="w-3.5 h-3.5 inline" />
+                                改期
+                              </button>
+                            )}
                             <button
                               className="text-xs text-red-600 hover:text-red-700"
                               onClick={() => onCancelBooking(booking.id)}
                             >
-                              取消预订
+                              {booking.settled ? '删除' : '取消'}
                             </button>
                           </div>
                         </div>

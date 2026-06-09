@@ -41,6 +41,7 @@ import {
   getMemberTransactions,
   getTransactionsByMember,
   createMemberTransaction,
+  settleBooking,
 } from './lib/storage';
 import { CourtCard } from './components/CourtCard';
 import { CourtForm } from './components/CourtForm';
@@ -53,7 +54,7 @@ import { StatsOverview } from './components/StatsOverview';
 import { MemberForm } from './components/MemberForm';
 import { MemberTransactionForm } from './components/MemberTransactionForm';
 import { MemberHistoryDrawer } from './components/MemberHistoryDrawer';
-import { formatDate, getBookingProgressStatus, getBookingProgressBadgeClass } from './lib/utils';
+import { formatDate, getBookingProgressStatus, getBookingProgressBadgeClass, calculateBookingAmount } from './lib/utils';
 import {
   Plus,
   Search,
@@ -75,6 +76,8 @@ import {
   ArrowUpCircle,
   ArrowDownCircle,
   Gift,
+  CheckCircle,
+  Banknote,
 } from 'lucide-preact';
 
 type TabValue = 'overview' | 'courts' | 'bookings' | 'inspections' | 'members' | 'transactions';
@@ -340,6 +343,16 @@ export function App() {
     }
     setShowRescheduleForm(false);
     setReschedulingBooking(null);
+  };
+
+  const handleSettleBooking = (booking: Booking) => {
+    const result = settleBooking(booking.id);
+    if (!result.success) {
+      alert(result.message || '结算失败');
+    } else {
+      alert(`结算成功，金额：¥${result.amount?.toFixed(2)}`);
+      refreshData();
+    }
   };
 
   const toggleBookingExpand = (bookingId: string) => {
@@ -694,6 +707,12 @@ export function App() {
                         状态
                       </th>
                       <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">
+                        费用
+                      </th>
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">
+                        结算状态
+                      </th>
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">
                         备注
                       </th>
                       <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase">
@@ -708,6 +727,8 @@ export function App() {
                       const isExpanded = expandedBookingIds.has(booking.id);
                       const hasChanges = booking.changeHistory && booking.changeHistory.length > 0;
                       const member = booking.memberId ? getMemberById(booking.memberId) : null;
+                      const estimatedAmount = court ? calculateBookingAmount(booking.startTime, booking.endTime, court.type) : 0;
+                      const displayAmount = booking.settledAmount ?? estimatedAmount;
                       return (
                         <>
                           <tr key={booking.id} className="hover:bg-gray-50">
@@ -759,31 +780,58 @@ export function App() {
                                 {BOOKING_PROGRESS_STATUS_LABEL[progressStatus]}
                               </span>
                             </td>
-                            <td className="px-4 py-3 text-sm text-gray-500 max-w-[200px] truncate">
+                            <td className="px-4 py-3 text-sm font-semibold text-gray-900">
+                              ¥{displayAmount.toFixed(2)}
+                            </td>
+                            <td className="px-4 py-3">
+                              {booking.settled ? (
+                                <span className="badge bg-green-100 text-green-700 inline-flex items-center gap-1">
+                                  <CheckCircle className="w-3 h-3" />
+                                  已结算
+                                </span>
+                              ) : (
+                                <span className="badge bg-yellow-100 text-yellow-700">
+                                  待结算
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-500 max-w-[160px] truncate">
                               {booking.notes || '-'}
                             </td>
                             <td className="px-4 py-3 text-right">
                               <div className="inline-flex items-center gap-3">
-                                <button
-                                  className="text-emerald-600 hover:text-emerald-700 text-sm inline-flex items-center gap-1"
-                                  onClick={() => handleRescheduleBooking(booking)}
-                                >
-                                  <CalendarClock className="w-4 h-4" />
-                                  改期
-                                </button>
+                                {!booking.settled && (
+                                  <button
+                                    className="text-blue-600 hover:text-blue-700 text-sm inline-flex items-center gap-1"
+                                    onClick={() => handleSettleBooking(booking)}
+                                    title="结算并生成消费记录"
+                                  >
+                                    <Banknote className="w-4 h-4" />
+                                    结算
+                                  </button>
+                                )}
+                                {!booking.settled && (
+                                  <button
+                                    className="text-emerald-600 hover:text-emerald-700 text-sm inline-flex items-center gap-1"
+                                    onClick={() => handleRescheduleBooking(booking)}
+                                  >
+                                    <CalendarClock className="w-4 h-4" />
+                                    改期
+                                  </button>
+                                )}
                                 <button
                                   className="text-red-600 hover:text-red-700 text-sm inline-flex items-center gap-1"
                                   onClick={() => handleCancelBooking(booking.id)}
                                 >
                                   <Trash2 className="w-4 h-4" />
-                                  取消
+                                  {booking.settled ? '删除' : '取消'}
                                 </button>
                               </div>
                             </td>
                           </tr>
                           {isExpanded && hasChanges && (
                             <tr key={`${booking.id}-history`} className="bg-gray-50">
-                              <td colSpan={8} className="px-4 py-3">
+                              <td colSpan={10} className="px-4 py-3">
                                 <div className="space-y-2">
                                   <p className="text-xs font-medium text-gray-600 flex items-center gap-1">
                                     <History className="w-3.5 h-3.5" />
@@ -1267,6 +1315,7 @@ export function App() {
           setDrawerOpen(false);
           handleRescheduleBooking(booking);
         }}
+        onSettleBooking={handleSettleBooking}
       />
 
       <Modal

@@ -1,5 +1,5 @@
 import type { Court, Booking, Inspection, BookingChange, Member, MemberTransaction, TransactionType } from '../types';
-import { getBookingProgressStatus, getTodayStr } from './utils';
+import { getBookingProgressStatus, getTodayStr, calculateBookingAmount, getLowestCourtPrice } from './utils';
 
 const COURTS_KEY = 'badminton_courts';
 const BOOKINGS_KEY = 'badminton_bookings';
@@ -247,6 +247,12 @@ export const deleteMember = (id: string): boolean => {
   const filtered = members.filter((m) => m.id !== id);
   if (filtered.length === members.length) return false;
   saveMembers(filtered);
+
+  const bookings = getBookings();
+  const filteredBookings = bookings.filter((b) => b.memberId !== id);
+  if (filteredBookings.length !== bookings.length) {
+    saveBookings(filteredBookings);
+  }
   return true;
 };
 
@@ -290,7 +296,7 @@ export const createMemberTransaction = (
   const members = getMembers();
   const memberIndex = members.findIndex((m) => m.id === memberId);
 
-  if (!memberIndex) {
+  if (memberIndex === -1) {
     return { success: false, message: '会员不存在' };
   }
 
@@ -372,8 +378,60 @@ export const getTodayConsumeAmount = (): number => {
     .reduce((sum, t) => sum + t.amount, 0);
 };
 
-export const getLowBalanceMemberCount = (threshold: number = 0): number => {
-  return getMembers().filter((m) => m.balance <= threshold && m.status === 'active').length;
+export const getLowBalanceMemberCount = (threshold?: number): number => {
+  const lowThreshold = threshold ?? getLowestCourtPrice();
+  return getMembers().filter((m) => m.balance < lowThreshold && m.status === 'active').length;
+};
+
+export interface SettleBookingResult {
+  success: boolean;
+  message?: string;
+  amount?: number;
+}
+
+export const settleBooking = (bookingId: string): SettleBookingResult => {
+  const bookings = getBookings();
+  const bookingIndex = bookings.findIndex((b) => b.id === bookingId);
+
+  if (bookingIndex === -1) {
+    return { success: false, message: '预订不存在' };
+  }
+
+  const booking = bookings[bookingIndex];
+  if (booking.settled) {
+    return { success: false, message: '该预订已结算' };
+  }
+
+  const courts = getCourts();
+  const court = courts.find((c) => c.id === booking.courtId);
+  if (!court) {
+    return { success: false, message: '场地不存在' };
+  }
+
+  const amount = calculateBookingAmount(booking.startTime, booking.endTime, court.type);
+
+  if (booking.memberId) {
+    const txResult = createMemberTransaction({
+      memberId: booking.memberId,
+      type: 'consume',
+      amount,
+      remark: `${court.name}消费 ${booking.startTime}-${booking.endTime}`,
+      relatedBookingId: booking.id,
+    });
+    if (!txResult.success) {
+      return { success: false, message: txResult.message };
+    }
+  }
+
+  bookings[bookingIndex] = {
+    ...booking,
+    settled: true,
+    settledAt: new Date().toISOString(),
+    settledAmount: amount,
+  };
+  saveBookings(bookings);
+
+  return { success: true, amount };
 };
 
 // Initialize with sample data if empty
