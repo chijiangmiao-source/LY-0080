@@ -1,5 +1,5 @@
 import { useMemo } from 'preact/hooks';
-import type { Court, Booking, Inspection } from '../types';
+import type { Court, Booking, Inspection, Member, MemberTransaction } from '../types';
 import { COURT_TYPE_LABEL } from '../types';
 import { Bar } from '@visx/shape';
 import { scaleBand, scaleLinear } from '@visx/scale';
@@ -13,13 +13,20 @@ import {
   AlertTriangle,
   Play,
   CalendarDays,
+  Wallet,
+  CreditCard,
+  AlertCircle,
+  Users,
 } from 'lucide-preact';
 import { getTodayStr, getBookingProgressStatus } from '../lib/utils';
+import { getTodayRechargeAmount, getTodayConsumeAmount, getLowBalanceMemberCount } from '../lib/storage';
 
 interface StatsOverviewProps {
   courts: Court[];
   bookings: Booking[];
   inspections: Inspection[];
+  members: Member[];
+  transactions: MemberTransaction[];
 }
 
 interface BookingStatusDatum {
@@ -34,7 +41,7 @@ interface CourtTypeDatum {
   count: number;
 }
 
-export function StatsOverview({ courts, bookings, inspections }: StatsOverviewProps) {
+export function StatsOverview({ courts, bookings, inspections, members, transactions }: StatsOverviewProps) {
   const stats = useMemo(() => {
     const idleCourts = courts.filter((c) => c.bookingStatus === 'idle').length;
     const bookedCourts = courts.filter((c) => c.bookingStatus === 'booked').length;
@@ -54,6 +61,12 @@ export function StatsOverview({ courts, bookings, inspections }: StatsOverviewPr
     );
     const inProgressCourts = inProgressCourtSet.size;
 
+    const todayRecharge = getTodayRechargeAmount();
+    const todayConsume = getTodayConsumeAmount();
+    const lowBalanceCount = getLowBalanceMemberCount();
+    const activeMembers = members.filter((m) => m.status === 'active').length;
+    const totalMemberBalance = members.reduce((sum, m) => sum + m.balance, 0);
+
     return {
       total: courts.length,
       idle: idleCourts,
@@ -66,8 +79,14 @@ export function StatsOverview({ courts, bookings, inspections }: StatsOverviewPr
       totalInspections: inspections.length,
       todayBookings,
       inProgressCourts,
+      todayRecharge,
+      todayConsume,
+      lowBalanceCount,
+      activeMembers,
+      totalMemberBalance,
+      totalMembers: members.length,
     };
-  }, [courts, bookings, inspections]);
+  }, [courts, bookings, inspections, members, transactions]);
 
   const bookingStatusData = useMemo<BookingStatusDatum[]>(
     () => [
@@ -145,7 +164,7 @@ export function StatsOverview({ courts, bookings, inspections }: StatsOverviewPr
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <div className="card p-4">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-emerald-100 text-emerald-600">
@@ -214,7 +233,9 @@ export function StatsOverview({ courts, bookings, inspections }: StatsOverviewPr
           </div>
           <p className="mt-3 text-xs text-gray-500">场地照明或地胶异常</p>
         </div>
+      </div>
 
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <div className="card p-4">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-purple-100 text-purple-600">
@@ -226,6 +247,58 @@ export function StatsOverview({ courts, bookings, inspections }: StatsOverviewPr
             </div>
           </div>
           <p className="mt-3 text-xs text-gray-500">共 {stats.totalInspections} 条巡检记录</p>
+        </div>
+
+        <div className="card p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-indigo-100 text-indigo-600">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">会员总数</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.totalMembers}</p>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-gray-500">活跃会员 {stats.activeMembers} 人</p>
+        </div>
+
+        <div className="card p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-emerald-100 text-emerald-600">
+              <Wallet className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">今日储值金额</p>
+              <p className="text-2xl font-bold text-gray-900">¥{stats.todayRecharge.toFixed(2)}</p>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-gray-500">会员储值总额：¥{stats.totalMemberBalance.toFixed(2)}</p>
+        </div>
+
+        <div className="card p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-red-100 text-red-600">
+              <CreditCard className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">今日消费金额</p>
+              <p className="text-2xl font-bold text-gray-900">¥{stats.todayConsume.toFixed(2)}</p>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-gray-500">会员今日消费扣费合计</p>
+        </div>
+
+        <div className="card p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-orange-100 text-orange-600">
+              <AlertCircle className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">余额不足会员数</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.lowBalanceCount}</p>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-gray-500">余额 ≤ 0 的活跃会员</p>
         </div>
       </div>
 

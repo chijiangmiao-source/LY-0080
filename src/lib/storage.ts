@@ -1,9 +1,11 @@
-import type { Court, Booking, Inspection, BookingChange } from '../types';
-import { getBookingProgressStatus } from './utils';
+import type { Court, Booking, Inspection, BookingChange, Member, MemberTransaction, TransactionType } from '../types';
+import { getBookingProgressStatus, getTodayStr } from './utils';
 
 const COURTS_KEY = 'badminton_courts';
 const BOOKINGS_KEY = 'badminton_bookings';
 const INSPECTIONS_KEY = 'badminton_inspections';
+const MEMBERS_KEY = 'badminton_members';
+const MEMBER_TRANSACTIONS_KEY = 'badminton_member_transactions';
 
 function getFromStorage<T>(key: string): T[] {
   try {
@@ -212,6 +214,168 @@ export const getInspectionsByCourt = (courtId: string): Inspection[] => {
   return getInspections().filter((i) => i.courtId === courtId);
 };
 
+// Members
+export const getMembers = (): Member[] => getFromStorage<Member>(MEMBERS_KEY);
+
+export const saveMembers = (members: Member[]): void => saveToStorage(MEMBERS_KEY, members);
+
+export const addMember = (member: Omit<Member, 'id' | 'balance' | 'giftHours'>): Member => {
+  const members = getMembers();
+  const newMember: Member = {
+    ...member,
+    id: generateId(),
+    balance: 0,
+    giftHours: 0,
+    createdAt: member.createdAt || new Date().toISOString(),
+  };
+  members.push(newMember);
+  saveMembers(members);
+  return newMember;
+};
+
+export const updateMember = (id: string, updates: Partial<Member>): Member | null => {
+  const members = getMembers();
+  const index = members.findIndex((m) => m.id === id);
+  if (index === -1) return null;
+  members[index] = { ...members[index], ...updates };
+  saveMembers(members);
+  return members[index];
+};
+
+export const deleteMember = (id: string): boolean => {
+  const members = getMembers();
+  const filtered = members.filter((m) => m.id !== id);
+  if (filtered.length === members.length) return false;
+  saveMembers(filtered);
+  return true;
+};
+
+export const getMemberById = (id: string): Member | undefined => {
+  return getMembers().find((m) => m.id === id);
+};
+
+export const getMemberByPhone = (phone: string): Member | undefined => {
+  return getMembers().find((m) => m.phone === phone);
+};
+
+export const isMemberPhoneDuplicate = (phone: string, excludeId?: string): boolean => {
+  const members = getMembers();
+  return members.some((m) => m.phone === phone && m.id !== excludeId);
+};
+
+// Member Transactions
+export const getMemberTransactions = (): MemberTransaction[] =>
+  getFromStorage<MemberTransaction>(MEMBER_TRANSACTIONS_KEY);
+
+export const saveMemberTransactions = (transactions: MemberTransaction[]): void =>
+  saveToStorage(MEMBER_TRANSACTIONS_KEY, transactions);
+
+export const getTransactionsByMember = (memberId: string): MemberTransaction[] => {
+  return getMemberTransactions().filter((t) => t.memberId === memberId);
+};
+
+interface CreateTransactionParams {
+  memberId: string;
+  type: TransactionType;
+  amount?: number;
+  hours?: number;
+  remark?: string;
+  relatedBookingId?: string;
+}
+
+export const createMemberTransaction = (
+  params: CreateTransactionParams
+): { success: boolean; message?: string; transaction?: MemberTransaction } => {
+  const { memberId, type, amount = 0, hours = 0, remark, relatedBookingId } = params;
+  const members = getMembers();
+  const memberIndex = members.findIndex((m) => m.id === memberId);
+
+  if (!memberIndex) {
+    return { success: false, message: '会员不存在' };
+  }
+
+  const member = members[memberIndex];
+  if (member.status !== 'active') {
+    return { success: false, message: '会员状态异常，无法进行交易' };
+  }
+
+  const beforeBalance = member.balance;
+  const beforeHours = member.giftHours;
+  let afterBalance = beforeBalance;
+  let afterHours = beforeHours;
+
+  switch (type) {
+    case 'recharge':
+    case 'refund':
+    case 'gift_amount':
+      afterBalance = beforeBalance + Math.abs(amount);
+      break;
+    case 'gift_hours':
+      afterHours = beforeHours + Math.abs(hours);
+      break;
+    case 'deduct':
+    case 'consume':
+      if (beforeBalance < amount) {
+        return { success: false, message: '会员余额不足' };
+      }
+      afterBalance = beforeBalance - amount;
+      break;
+  }
+
+  const transactions = getMemberTransactions();
+  const transaction: MemberTransaction = {
+    id: generateId(),
+    memberId,
+    type,
+    amount: Math.abs(amount),
+    hours: Math.abs(hours),
+    beforeBalance,
+    afterBalance,
+    beforeHours,
+    afterHours,
+    remark,
+    relatedBookingId,
+    createdAt: new Date().toISOString(),
+  };
+  transactions.push(transaction);
+  saveMemberTransactions(transactions);
+
+  members[memberIndex] = {
+    ...member,
+    balance: afterBalance,
+    giftHours: afterHours,
+  };
+  saveMembers(members);
+
+  return { success: true, transaction };
+};
+
+export const getTodayRechargeAmount = (): number => {
+  const today = getTodayStr();
+  const transactions = getMemberTransactions();
+  return transactions
+    .filter((t) => {
+      const txDate = new Date(t.createdAt).toISOString().split('T')[0];
+      return txDate === today && t.type === 'recharge';
+    })
+    .reduce((sum, t) => sum + t.amount, 0);
+};
+
+export const getTodayConsumeAmount = (): number => {
+  const today = getTodayStr();
+  const transactions = getMemberTransactions();
+  return transactions
+    .filter((t) => {
+      const txDate = new Date(t.createdAt).toISOString().split('T')[0];
+      return txDate === today && (t.type === 'consume' || t.type === 'deduct');
+    })
+    .reduce((sum, t) => sum + t.amount, 0);
+};
+
+export const getLowBalanceMemberCount = (threshold: number = 0): number => {
+  return getMembers().filter((m) => m.balance <= threshold && m.status === 'active').length;
+};
+
 // Initialize with sample data if empty
 export const initSampleData = (): void => {
   if (getCourts().length === 0) {
@@ -284,5 +448,52 @@ export const initSampleData = (): void => {
       },
     ];
     saveCourts(sampleCourts);
+  }
+
+  if (getMembers().length === 0) {
+    const sampleMembers: Member[] = [
+      {
+        id: generateId(),
+        name: '张三',
+        phone: '13800138001',
+        level: 'gold',
+        balance: 500,
+        giftHours: 2,
+        createdAt: new Date().toISOString(),
+        status: 'active',
+        note: '黄金会员',
+      },
+      {
+        id: generateId(),
+        name: '李四',
+        phone: '13800138002',
+        level: 'silver',
+        balance: 200,
+        giftHours: 0,
+        createdAt: new Date().toISOString(),
+        status: 'active',
+      },
+      {
+        id: generateId(),
+        name: '王五',
+        phone: '13800138003',
+        level: 'diamond',
+        balance: 0,
+        giftHours: 10,
+        createdAt: new Date().toISOString(),
+        status: 'active',
+      },
+      {
+        id: generateId(),
+        name: '赵六',
+        phone: '13800138004',
+        level: 'normal',
+        balance: 50,
+        giftHours: 0,
+        createdAt: new Date().toISOString(),
+        status: 'active',
+      },
+    ];
+    saveMembers(sampleMembers);
   }
 };

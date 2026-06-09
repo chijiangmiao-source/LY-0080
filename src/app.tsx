@@ -1,7 +1,25 @@
 import { useState, useEffect, useMemo } from 'preact/hooks';
 import * as Tabs from '@radix-ui/react-tabs';
-import type { Court, Booking, Inspection, BookingStatus, CourtType } from './types';
-import { BOOKING_STATUS_LABEL, COURT_TYPE_LABEL, BOOKING_PROGRESS_STATUS_LABEL } from './types';
+import type {
+  Court,
+  Booking,
+  Inspection,
+  BookingStatus,
+  CourtType,
+  Member,
+  MemberTransaction,
+  MemberLevel,
+  MemberStatus,
+  TransactionType,
+} from './types';
+import {
+  BOOKING_STATUS_LABEL,
+  COURT_TYPE_LABEL,
+  BOOKING_PROGRESS_STATUS_LABEL,
+  MEMBER_LEVEL_LABEL,
+  MEMBER_STATUS_LABEL,
+  TRANSACTION_TYPE_LABEL,
+} from './types';
 import {
   getCourts,
   addCourt,
@@ -16,6 +34,13 @@ import {
   addInspection,
   getInspectionsByCourt,
   initSampleData,
+  getMembers,
+  addMember,
+  updateMember,
+  deleteMember,
+  getMemberTransactions,
+  getTransactionsByMember,
+  createMemberTransaction,
 } from './lib/storage';
 import { CourtCard } from './components/CourtCard';
 import { CourtForm } from './components/CourtForm';
@@ -25,6 +50,9 @@ import { RescheduleForm } from './components/RescheduleForm';
 import { InspectionForm } from './components/InspectionForm';
 import { Modal } from './components/Modal';
 import { StatsOverview } from './components/StatsOverview';
+import { MemberForm } from './components/MemberForm';
+import { MemberTransactionForm } from './components/MemberTransactionForm';
+import { MemberHistoryDrawer } from './components/MemberHistoryDrawer';
 import { formatDate, getBookingProgressStatus, getBookingProgressBadgeClass } from './lib/utils';
 import {
   Plus,
@@ -39,14 +67,24 @@ import {
   ChevronDown,
   ChevronUp,
   History,
+  Users,
+  Wallet,
+  CreditCard,
+  Eye,
+  Edit2,
+  ArrowUpCircle,
+  ArrowDownCircle,
+  Gift,
 } from 'lucide-preact';
 
-type TabValue = 'overview' | 'courts' | 'bookings' | 'inspections';
+type TabValue = 'overview' | 'courts' | 'bookings' | 'inspections' | 'members' | 'transactions';
 
 export function App() {
   const [courts, setCourts] = useState<Court[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [inspections, setInspections] = useState<Inspection[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [transactions, setTransactions] = useState<MemberTransaction[]>([]);
 
   const [activeTab, setActiveTab] = useState<TabValue>('overview');
 
@@ -55,6 +93,15 @@ export function App() {
   const [typeFilter, setTypeFilter] = useState<CourtType | 'all'>('all');
   const [zoneFilter, setZoneFilter] = useState('');
   const [abnormalOnly, setAbnormalOnly] = useState(false);
+
+  const [memberSearchText, setMemberSearchText] = useState('');
+  const [memberLevelFilter, setMemberLevelFilter] = useState<MemberLevel | 'all'>('all');
+  const [memberStatusFilter, setMemberStatusFilter] = useState<MemberStatus | 'all'>('all');
+
+  const [txMemberFilter, setTxMemberFilter] = useState<string>('all');
+  const [txTypeFilter, setTxTypeFilter] = useState<TransactionType | 'all'>('all');
+  const [txStartDate, setTxStartDate] = useState('');
+  const [txEndDate, setTxEndDate] = useState('');
 
   const [showCourtForm, setShowCourtForm] = useState(false);
   const [editingCourt, setEditingCourt] = useState<Court | null>(null);
@@ -76,6 +123,18 @@ export function App() {
 
   const [expandedBookingIds, setExpandedBookingIds] = useState<Set<string>>(new Set());
 
+  const [showMemberForm, setShowMemberForm] = useState(false);
+  const [editingMember, setEditingMember] = useState<Member | null>(null);
+
+  const [showMemberDeleteConfirm, setShowMemberDeleteConfirm] = useState(false);
+  const [deletingMember, setDeletingMember] = useState<Member | null>(null);
+
+  const [showMemberTxForm, setShowMemberTxForm] = useState(false);
+  const [transactionMember, setTransactionMember] = useState<Member | null>(null);
+
+  const [memberHistoryOpen, setMemberHistoryOpen] = useState(false);
+  const [historyMember, setHistoryMember] = useState<Member | null>(null);
+
   useEffect(() => {
     initSampleData();
     refreshData();
@@ -85,6 +144,8 @@ export function App() {
     setCourts(getCourts());
     setBookings(getBookings());
     setInspections(getInspections());
+    setMembers(getMembers());
+    setTransactions(getMemberTransactions());
   };
 
   const zones = useMemo(() => {
@@ -119,6 +180,93 @@ export function App() {
     });
   }, [courts, searchText, statusFilter, typeFilter, zoneFilter, abnormalOnly]);
 
+  const filteredMembers = useMemo(() => {
+    return members.filter((member) => {
+      if (memberSearchText) {
+        const search = memberSearchText.toLowerCase();
+        if (
+          !member.name.toLowerCase().includes(search) &&
+          !member.phone.includes(search)
+        ) {
+          return false;
+        }
+      }
+      if (memberLevelFilter !== 'all' && member.level !== memberLevelFilter) {
+        return false;
+      }
+      if (memberStatusFilter !== 'all' && member.status !== memberStatusFilter) {
+        return false;
+      }
+      return true;
+    });
+  }, [members, memberSearchText, memberLevelFilter, memberStatusFilter]);
+
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter((tx) => {
+      if (txMemberFilter !== 'all' && tx.memberId !== txMemberFilter) {
+        return false;
+      }
+      if (txTypeFilter !== 'all' && tx.type !== txTypeFilter) {
+        return false;
+      }
+      const txDate = new Date(tx.createdAt).toISOString().split('T')[0];
+      if (txStartDate && txDate < txStartDate) {
+        return false;
+      }
+      if (txEndDate && txDate > txEndDate) {
+        return false;
+      }
+      return true;
+    }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [transactions, txMemberFilter, txTypeFilter, txStartDate, txEndDate]);
+
+  const getTxIcon = (type: string) => {
+    switch (type) {
+      case 'recharge':
+      case 'refund':
+      case 'gift_amount':
+        return <ArrowUpCircle className="w-4 h-4 text-emerald-600" />;
+      case 'deduct':
+      case 'consume':
+        return <ArrowDownCircle className="w-4 h-4 text-red-600" />;
+      case 'gift_hours':
+        return <Gift className="w-4 h-4 text-blue-600" />;
+      default:
+        return <CreditCard className="w-4 h-4 text-gray-600" />;
+    }
+  };
+
+  const getTxColor = (type: string) => {
+    switch (type) {
+      case 'recharge':
+      case 'refund':
+      case 'gift_amount':
+        return 'text-emerald-600';
+      case 'deduct':
+      case 'consume':
+        return 'text-red-600';
+      case 'gift_hours':
+        return 'text-blue-600';
+      default:
+        return 'text-gray-600';
+    }
+  };
+
+  const getTxPrefix = (type: string) => {
+    switch (type) {
+      case 'recharge':
+      case 'refund':
+      case 'gift_amount':
+      case 'gift_hours':
+        return '+';
+      case 'deduct':
+      case 'consume':
+        return '-';
+      default:
+        return '';
+    }
+  };
+
   const handleAddCourt = () => {
     setEditingCourt(null);
     setShowCourtForm(true);
@@ -139,7 +287,7 @@ export function App() {
     setShowDeleteConfirm(true);
   };
 
-  const confirmDelete = () => {
+  const confirmDeleteCourt = () => {
     if (deletingCourt) {
       deleteCourt(deletingCourt.id);
       refreshData();
@@ -226,8 +374,88 @@ export function App() {
     setAbnormalOnly(false);
   };
 
+  const resetMemberFilters = () => {
+    setMemberSearchText('');
+    setMemberLevelFilter('all');
+    setMemberStatusFilter('all');
+  };
+
+  const resetTxFilters = () => {
+    setTxMemberFilter('all');
+    setTxTypeFilter('all');
+    setTxStartDate('');
+    setTxEndDate('');
+  };
+
+  const handleAddMember = () => {
+    setEditingMember(null);
+    setShowMemberForm(true);
+  };
+
+  const handleEditMember = (member: Member) => {
+    setEditingMember(member);
+    setShowMemberForm(true);
+  };
+
+  const handleMemberSubmit = (data: Omit<Member, 'id' | 'balance' | 'giftHours'>) => {
+    if (editingMember) {
+      updateMember(editingMember.id, data);
+    } else {
+      addMember(data);
+    }
+    refreshData();
+    setShowMemberForm(false);
+    setEditingMember(null);
+  };
+
+  const handleDeleteMember = (member: Member) => {
+    setDeletingMember(member);
+    setShowMemberDeleteConfirm(true);
+  };
+
+  const confirmDeleteMember = () => {
+    if (deletingMember) {
+      deleteMember(deletingMember.id);
+      refreshData();
+    }
+    setShowMemberDeleteConfirm(false);
+    setDeletingMember(null);
+  };
+
+  const handleMemberTransaction = (member: Member) => {
+    setTransactionMember(member);
+    setShowMemberTxForm(true);
+  };
+
+  const handleMemberTransactionSubmit = (data: {
+    type: TransactionType;
+    amount: number;
+    hours: number;
+    remark?: string;
+  }): { success: boolean; message?: string } => {
+    if (!transactionMember) {
+      return { success: false, message: '请选择会员' };
+    }
+    const result = createMemberTransaction({
+      memberId: transactionMember.id,
+      ...data,
+    });
+    if (result.success) {
+      refreshData();
+    }
+    return { success: result.success, message: result.message };
+  };
+
+  const handleViewMemberHistory = (member: Member) => {
+    setHistoryMember(member);
+    setMemberHistoryOpen(true);
+  };
+
   const courtBookings = selectedCourt ? getBookingsByCourt(selectedCourt.id) : [];
   const courtInspections = selectedCourt ? getInspectionsByCourt(selectedCourt.id) : [];
+  const historyMemberTransactions = historyMember ? getTransactionsByMember(historyMember.id) : [];
+
+  const getMemberById = (id?: string) => members.find((m) => m.id === id);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -240,7 +468,7 @@ export function App() {
               </div>
               <div>
                 <h1 className="text-lg font-bold text-gray-900">羽毛球馆运营管理</h1>
-                <p className="text-xs text-gray-500">场地维护 · 预订管理 · 设备巡检</p>
+                <p className="text-xs text-gray-500">场地维护 · 预订管理 · 会员储值 · 设备巡检</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -255,7 +483,7 @@ export function App() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <Tabs.Root value={activeTab} onValueChange={(v) => setActiveTab(v as TabValue)}>
-          <Tabs.List className="flex gap-1 mb-6 border-b border-gray-200">
+          <Tabs.List className="flex flex-wrap gap-1 mb-6 border-b border-gray-200">
             <Tabs.Trigger
               value="overview"
               className="px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent data-[state=active]:text-emerald-600 data-[state=active]:border-emerald-600"
@@ -284,6 +512,24 @@ export function App() {
               </span>
             </Tabs.Trigger>
             <Tabs.Trigger
+              value="members"
+              className="px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent data-[state=active]:text-emerald-600 data-[state=active]:border-emerald-600"
+            >
+              <span className="flex items-center gap-2">
+                <Users className="w-4 h-4" />
+                会员管理
+              </span>
+            </Tabs.Trigger>
+            <Tabs.Trigger
+              value="transactions"
+              className="px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent data-[state=active]:text-emerald-600 data-[state=active]:border-emerald-600"
+            >
+              <span className="flex items-center gap-2">
+                <Wallet className="w-4 h-4" />
+                交易记录
+              </span>
+            </Tabs.Trigger>
+            <Tabs.Trigger
               value="inspections"
               className="px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent data-[state=active]:text-emerald-600 data-[state=active]:border-emerald-600"
             >
@@ -295,7 +541,13 @@ export function App() {
           </Tabs.List>
 
           <Tabs.Content value="overview">
-            <StatsOverview courts={courts} bookings={bookings} inspections={inspections} />
+            <StatsOverview
+              courts={courts}
+              bookings={bookings}
+              inspections={inspections}
+              members={members}
+              transactions={transactions}
+            />
           </Tabs.Content>
 
           <Tabs.Content value="courts">
@@ -430,6 +682,9 @@ export function App() {
                         客户信息
                       </th>
                       <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">
+                        会员
+                      </th>
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">
                         日期
                       </th>
                       <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">
@@ -452,6 +707,7 @@ export function App() {
                       const progressStatus = getBookingProgressStatus(booking);
                       const isExpanded = expandedBookingIds.has(booking.id);
                       const hasChanges = booking.changeHistory && booking.changeHistory.length > 0;
+                      const member = booking.memberId ? getMemberById(booking.memberId) : null;
                       return (
                         <>
                           <tr key={booking.id} className="hover:bg-gray-50">
@@ -464,6 +720,18 @@ export function App() {
                             <td className="px-4 py-3 text-sm">
                               <div className="text-gray-900 font-medium">{booking.customerName}</div>
                               <div className="text-gray-500 text-xs">{booking.customerPhone}</div>
+                            </td>
+                            <td className="px-4 py-3 text-sm">
+                              {member ? (
+                                <div>
+                                  <div className="text-emerald-700 font-medium">{member.name}</div>
+                                  <div className="text-xs text-emerald-600">
+                                    余额 ¥{member.balance.toFixed(2)}
+                                  </div>
+                                </div>
+                              ) : (
+                                <span className="text-gray-400">散客</span>
+                              )}
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-700">{booking.date}</td>
                             <td className="px-4 py-3 text-sm text-gray-700">
@@ -515,7 +783,7 @@ export function App() {
                           </tr>
                           {isExpanded && hasChanges && (
                             <tr key={`${booking.id}-history`} className="bg-gray-50">
-                              <td colSpan={7} className="px-4 py-3">
+                              <td colSpan={8} className="px-4 py-3">
                                 <div className="space-y-2">
                                   <p className="text-xs font-medium text-gray-600 flex items-center gap-1">
                                     <History className="w-3.5 h-3.5" />
@@ -547,6 +815,328 @@ export function App() {
                             </tr>
                           )}
                         </>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </Tabs.Content>
+
+          <Tabs.Content value="members">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-gray-900">会员管理</h2>
+              <button className="btn-primary" onClick={handleAddMember}>
+                <Plus className="w-4 h-4" />
+                新增会员
+              </button>
+            </div>
+
+            <div className="mb-6 space-y-4">
+              <div className="flex flex-wrap gap-3 items-end">
+                <div className="flex-1 min-w-[240px]">
+                  <label className="label">搜索</label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="text"
+                      className="input pl-9"
+                      placeholder="搜索会员姓名或手机号..."
+                      value={memberSearchText}
+                      onInput={(e) => setMemberSearchText((e.target as HTMLInputElement).value)}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="label">会员等级</label>
+                  <select
+                    className="input min-w-[140px]"
+                    value={memberLevelFilter}
+                    onChange={(e) => setMemberLevelFilter((e.target as HTMLSelectElement).value as MemberLevel | 'all')}
+                  >
+                    <option value="all">全部等级</option>
+                    {Object.entries(MEMBER_LEVEL_LABEL).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">会员状态</label>
+                  <select
+                    className="input min-w-[140px]"
+                    value={memberStatusFilter}
+                    onChange={(e) => setMemberStatusFilter((e.target as HTMLSelectElement).value as MemberStatus | 'all')}
+                  >
+                    <option value="all">全部状态</option>
+                    {Object.entries(MEMBER_STATUS_LABEL).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button className="btn-secondary" onClick={resetMemberFilters}>
+                  <X className="w-4 h-4" />
+                  重置
+                </button>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-gray-500">
+                <Filter className="w-4 h-4" />
+                共找到 {filteredMembers.length} 个会员
+              </div>
+            </div>
+
+            <div className="card overflow-hidden">
+              {filteredMembers.length === 0 ? (
+                <div className="p-12 text-center">
+                  <Users className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                  <p className="text-gray-500">暂无会员记录</p>
+                  <button className="btn-primary mt-4" onClick={handleAddMember}>
+                    <Plus className="w-4 h-4" />
+                    添加第一个会员
+                  </button>
+                </div>
+              ) : (
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">
+                        会员信息
+                      </th>
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">
+                        等级
+                      </th>
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">
+                        可用余额
+                      </th>
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">
+                        赠送课时
+                      </th>
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">
+                        开卡日期
+                      </th>
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">
+                        状态
+                      </th>
+                      <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase">
+                        操作
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredMembers.map((member) => (
+                      <tr key={member.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-sm">
+                          <div className="text-gray-900 font-medium">{member.name}</div>
+                          <div className="text-gray-500 text-xs">{member.phone}</div>
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          <span className="badge bg-purple-100 text-purple-700">
+                            {MEMBER_LEVEL_LABEL[member.level]}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          <span className={`font-semibold ${member.balance === 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                            ¥{member.balance.toFixed(2)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-blue-600 font-medium">
+                          {member.giftHours} 小时
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-700">
+                          {formatDate(member.createdAt)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`badge ${
+                              member.status === 'active'
+                                ? 'bg-green-100 text-green-700'
+                                : member.status === 'frozen'
+                                ? 'bg-yellow-100 text-yellow-700'
+                                : 'bg-gray-100 text-gray-600'
+                            }`}
+                          >
+                            {MEMBER_STATUS_LABEL[member.status]}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="inline-flex items-center gap-3">
+                            <button
+                              className="text-gray-600 hover:text-gray-700 text-sm inline-flex items-center gap-1"
+                              onClick={() => handleViewMemberHistory(member)}
+                              title="查看交易记录"
+                            >
+                              <Eye className="w-4 h-4" />
+                              明细
+                            </button>
+                            <button
+                              className="text-emerald-600 hover:text-emerald-700 text-sm inline-flex items-center gap-1"
+                              onClick={() => handleMemberTransaction(member)}
+                              title="储值/扣费/退款"
+                            >
+                              <Wallet className="w-4 h-4" />
+                              交易
+                            </button>
+                            <button
+                              className="text-blue-600 hover:text-blue-700 text-sm inline-flex items-center gap-1"
+                              onClick={() => handleEditMember(member)}
+                            >
+                              <Edit2 className="w-4 h-4" />
+                              编辑
+                            </button>
+                            <button
+                              className="text-red-600 hover:text-red-700 text-sm inline-flex items-center gap-1"
+                              onClick={() => handleDeleteMember(member)}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                              删除
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </Tabs.Content>
+
+          <Tabs.Content value="transactions">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-gray-900">交易记录</h2>
+              <div className="text-sm text-gray-500">
+                共 {filteredTransactions.length} 条记录
+              </div>
+            </div>
+
+            <div className="card p-4 mb-4">
+              <div className="flex flex-wrap gap-3 items-end">
+                <div>
+                  <label className="label">选择会员</label>
+                  <select
+                    className="input min-w-[180px]"
+                    value={txMemberFilter}
+                    onChange={(e) => setTxMemberFilter((e.target as HTMLSelectElement).value)}
+                  >
+                    <option value="all">全部会员</option>
+                    {members.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} - {m.phone}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">交易类型</label>
+                  <select
+                    className="input min-w-[140px]"
+                    value={txTypeFilter}
+                    onChange={(e) => setTxTypeFilter((e.target as HTMLSelectElement).value as TransactionType | 'all')}
+                  >
+                    <option value="all">全部类型</option>
+                    {Object.entries(TRANSACTION_TYPE_LABEL).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">开始日期</label>
+                  <input
+                    type="date"
+                    className="input min-w-[140px]"
+                    value={txStartDate}
+                    onInput={(e) => setTxStartDate((e.target as HTMLInputElement).value)}
+                  />
+                </div>
+                <div>
+                  <label className="label">结束日期</label>
+                  <input
+                    type="date"
+                    className="input min-w-[140px]"
+                    value={txEndDate}
+                    onInput={(e) => setTxEndDate((e.target as HTMLInputElement).value)}
+                    min={txStartDate}
+                  />
+                </div>
+                <button className="btn-secondary" onClick={resetTxFilters}>
+                  <X className="w-4 h-4" />
+                  重置
+                </button>
+              </div>
+            </div>
+
+            <div className="card overflow-hidden">
+              {filteredTransactions.length === 0 ? (
+                <div className="p-12 text-center">
+                  <Wallet className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                  <p className="text-gray-500">暂无交易记录</p>
+                </div>
+              ) : (
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">
+                        交易时间
+                      </th>
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">
+                        会员
+                      </th>
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">
+                        类型
+                      </th>
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">
+                        金额/课时
+                      </th>
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">
+                        余额变动
+                      </th>
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">
+                        备注
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredTransactions.map((tx) => {
+                      const member = members.find((m) => m.id === tx.memberId);
+                      return (
+                        <tr key={tx.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm text-gray-700">
+                            {new Date(tx.createdAt).toLocaleString('zh-CN')}
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            <div className="text-gray-900 font-medium">{member?.name || '未知会员'}</div>
+                            <div className="text-gray-500 text-xs">{member?.phone || '-'}</div>
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            <div className="flex items-center gap-1.5">
+                              {getTxIcon(tx.type)}
+                              <span className={getTxColor(tx.type)}>
+                                {TRANSACTION_TYPE_LABEL[tx.type]}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            {tx.type === 'gift_hours' ? (
+                              <span className={`font-semibold ${getTxColor(tx.type)}`}>
+                                {getTxPrefix(tx.type)}{tx.hours} 小时
+                              </span>
+                            ) : (
+                              <span className={`font-semibold ${getTxColor(tx.type)}`}>
+                                {getTxPrefix(tx.type)}¥{tx.amount.toFixed(2)}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            ¥{tx.beforeBalance.toFixed(2)} → ¥{tx.afterBalance.toFixed(2)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-500">
+                            {tx.remark || '-'}
+                          </td>
+                        </tr>
                       );
                     })}
                   </tbody>
@@ -757,7 +1347,7 @@ export function App() {
           >
             取消
           </button>
-          <button className="btn-danger" onClick={confirmDelete}>
+          <button className="btn-danger" onClick={confirmDeleteCourt}>
             确认删除
           </button>
         </div>
@@ -783,6 +1373,83 @@ export function App() {
           />
         )}
       </Modal>
+
+      <Modal
+        open={showMemberForm}
+        onClose={() => {
+          setShowMemberForm(false);
+          setEditingMember(null);
+        }}
+        title={editingMember ? '编辑会员' : '新增会员'}
+      >
+        <MemberForm
+          member={editingMember || undefined}
+          onSubmit={handleMemberSubmit}
+          onCancel={() => {
+            setShowMemberForm(false);
+            setEditingMember(null);
+          }}
+        />
+      </Modal>
+
+      <Modal
+        open={showMemberDeleteConfirm}
+        onClose={() => {
+          setShowMemberDeleteConfirm(false);
+          setDeletingMember(null);
+        }}
+        title="确认删除会员"
+      >
+        <p className="text-sm text-gray-600 mb-6">
+          确定要删除会员 <span className="font-medium text-gray-900">{deletingMember?.name}</span> 吗？
+          此操作不可撤销。
+        </p>
+        <div className="flex justify-end gap-3">
+          <button
+            className="btn-secondary"
+            onClick={() => {
+              setShowMemberDeleteConfirm(false);
+              setDeletingMember(null);
+            }}
+          >
+            取消
+          </button>
+          <button className="btn-danger" onClick={confirmDeleteMember}>
+            确认删除
+          </button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={showMemberTxForm && !!transactionMember}
+        onClose={() => {
+          setShowMemberTxForm(false);
+          setTransactionMember(null);
+        }}
+        title="会员交易操作"
+      >
+        {transactionMember && (
+          <MemberTransactionForm
+            member={transactionMember}
+            onSubmit={handleMemberTransactionSubmit}
+            onCancel={() => {
+              setShowMemberTxForm(false);
+              setTransactionMember(null);
+              refreshData();
+            }}
+          />
+        )}
+      </Modal>
+
+      <MemberHistoryDrawer
+        open={memberHistoryOpen}
+        onClose={() => {
+          setMemberHistoryOpen(false);
+          setHistoryMember(null);
+        }}
+        member={historyMember}
+        transactions={historyMemberTransactions}
+      />
     </div>
   );
 }

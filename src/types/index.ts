@@ -4,6 +4,9 @@ export type CourtType = 'standard' | 'vip' | 'training' | 'competition';
 export type InspectionStatus = 'pending' | 'processing' | 'resolved';
 export type ProblemType = 'lighting' | 'floor' | 'net' | 'equipment' | 'other';
 export type BookingProgressStatus = 'upcoming' | 'in_progress' | 'ended';
+export type MemberLevel = 'normal' | 'silver' | 'gold' | 'diamond';
+export type MemberStatus = 'active' | 'inactive' | 'frozen';
+export type TransactionType = 'recharge' | 'deduct' | 'refund' | 'gift_hours' | 'gift_amount' | 'consume';
 
 export interface Court {
   id: string;
@@ -33,6 +36,7 @@ export interface Booking {
   courtId: string;
   customerName: string;
   customerPhone: string;
+  memberId?: string;
   date: string;
   startTime: string;
   endTime: string;
@@ -89,4 +93,53 @@ export const PROBLEM_TYPE_LABEL: Record<ProblemType, string> = {
   net: '球网问题',
   equipment: '设备问题',
   other: '其他问题',
+};
+
+export interface Member {
+  id: string;
+  name: string;
+  phone: string;
+  level: MemberLevel;
+  balance: number;
+  giftHours: number;
+  createdAt: string;
+  status: MemberStatus;
+  note?: string;
+}
+
+export interface MemberTransaction {
+  id: string;
+  memberId: string;
+  type: TransactionType;
+  amount: number;
+  hours: number;
+  beforeBalance: number;
+  afterBalance: number;
+  beforeHours: number;
+  afterHours: number;
+  remark?: string;
+  relatedBookingId?: string;
+  createdAt: string;
+}
+
+export const MEMBER_LEVEL_LABEL: Record<MemberLevel, string> = {
+  normal: '普通会员',
+  silver: '白银会员',
+  gold: '黄金会员',
+  diamond: '钻石会员',
+};
+
+export const MEMBER_STATUS_LABEL: Record<MemberStatus, string> = {
+  active: '正常',
+  inactive: '停用',
+  frozen: '冻结',
+};
+
+export const TRANSACTION_TYPE_LABEL: Record<TransactionType, string> = {
+  recharge: '储值',
+  deduct: '扣费',
+  refund: '退款',
+  gift_hours: '赠送课时',
+  gift_amount: '赠送金额',
+  consume: '消费',
 };
