@@ -6,7 +6,9 @@ export type ProblemType = 'lighting' | 'floor' | 'net' | 'equipment' | 'other';
 export type BookingProgressStatus = 'upcoming' | 'in_progress' | 'ended';
 export type MemberLevel = 'normal' | 'silver' | 'gold' | 'diamond';
 export type MemberStatus = 'active' | 'inactive' | 'frozen';
-export type TransactionType = 'recharge' | 'deduct' | 'refund' | 'gift_hours' | 'gift_amount' | 'consume';
+export type TransactionType = 'recharge' | 'deduct' | 'refund' | 'gift_hours' | 'gift_amount' | 'consume' | 'package_purchase' | 'package_deduct';
+export type PackageType = 'count' | 'hourly' | 'time_slot';
+export type PackageStatus = 'active' | 'expired' | 'depleted';
 
 export interface Court {
   id: string;
@@ -46,6 +48,7 @@ export interface Booking {
   settled?: boolean;
   settledAt?: string;
   settledAmount?: number;
+  settleDetails?: BookingSettleDetails;
 }
 
 export const COURT_PRICE_PER_HOUR: Record<CourtType, number> = {
@@ -117,6 +120,37 @@ export interface Member {
   note?: string;
 }
 
+export interface MemberPackage {
+  id: string;
+  memberId: string;
+  name: string;
+  type: PackageType;
+  totalCount: number;
+  usedCount: number;
+  totalHours: number;
+  usedHours: number;
+  applicableCourtTypes: CourtType[];
+  applicableTimeSlots: string[];
+  validFrom: string;
+  validTo: string;
+  createdAt: string;
+}
+
+export interface PackageDeductionDetail {
+  packageId: string;
+  packageName: string;
+  packageType: PackageType;
+  deductedCount: number;
+  deductedHours: number;
+  deductedAmount: number;
+}
+
+export interface BookingSettleDetails {
+  packageDeductions: PackageDeductionDetail[];
+  balanceDeduction: number;
+  totalAmount: number;
+}
+
 export interface MemberTransaction {
   id: string;
   memberId: string;
@@ -129,6 +163,9 @@ export interface MemberTransaction {
   afterHours: number;
   remark?: string;
   relatedBookingId?: string;
+  relatedPackageId?: string;
+  packageDeductions?: PackageDeductionDetail[];
+  balanceDeduction?: number;
   createdAt: string;
 }
 
@@ -152,4 +189,18 @@ export const TRANSACTION_TYPE_LABEL: Record<TransactionType, string> = {
   gift_hours: '赠送课时',
   gift_amount: '赠送金额',
   consume: '消费',
+  package_purchase: '购买套餐',
+  package_deduct: '套餐抵扣',
+};
+
+export const PACKAGE_TYPE_LABEL: Record<PackageType, string> = {
+  count: '次卡',
+  hourly: '小时卡',
+  time_slot: '时段套餐',
+};
+
+export const PACKAGE_STATUS_LABEL: Record<PackageStatus, string> = {
+  active: '有效',
+  expired: '已过期',
+  depleted: '已用完',
 };

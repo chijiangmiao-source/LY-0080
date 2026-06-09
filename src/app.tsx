@@ -11,6 +11,8 @@ import type {
   MemberLevel,
   MemberStatus,
   TransactionType,
+  MemberPackage,
+  PackageType,
 } from './types';
 import {
   BOOKING_STATUS_LABEL,
@@ -42,6 +44,11 @@ import {
   getTransactionsByMember,
   createMemberTransaction,
   settleBooking,
+  getMemberPackages,
+  getPackagesByMember,
+  addMemberPackage,
+  updateMemberPackage,
+  deleteMemberPackage,
 } from './lib/storage';
 import { CourtCard } from './components/CourtCard';
 import { CourtForm } from './components/CourtForm';
@@ -54,6 +61,8 @@ import { StatsOverview } from './components/StatsOverview';
 import { MemberForm } from './components/MemberForm';
 import { MemberTransactionForm } from './components/MemberTransactionForm';
 import { MemberHistoryDrawer } from './components/MemberHistoryDrawer';
+import { PackageForm } from './components/PackageForm';
+import { MemberPackageDrawer } from './components/MemberPackageDrawer';
 import { formatDate, getBookingProgressStatus, getBookingProgressBadgeClass, calculateBookingAmount } from './lib/utils';
 import {
   Plus,
@@ -78,6 +87,7 @@ import {
   Gift,
   CheckCircle,
   Banknote,
+  Ticket,
 } from 'lucide-preact';
 
 type TabValue = 'overview' | 'courts' | 'bookings' | 'inspections' | 'members' | 'transactions';
@@ -88,6 +98,7 @@ export function App() {
   const [inspections, setInspections] = useState<Inspection[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [transactions, setTransactions] = useState<MemberTransaction[]>([]);
+  const [memberPackages, setMemberPackages] = useState<MemberPackage[]>([]);
 
   const [activeTab, setActiveTab] = useState<TabValue>('overview');
 
@@ -138,6 +149,18 @@ export function App() {
   const [memberHistoryOpen, setMemberHistoryOpen] = useState(false);
   const [historyMember, setHistoryMember] = useState<Member | null>(null);
 
+  const [memberPackageOpen, setMemberPackageOpen] = useState(false);
+  const [packageMember, setPackageMember] = useState<Member | null>(null);
+
+  const [showPackageForm, setShowPackageForm] = useState(false);
+  const [packageFormMember, setPackageFormMember] = useState<Member | null>(null);
+  const [editingPackage, setEditingPackage] = useState<MemberPackage | null>(null);
+
+  const [showPackageDeleteConfirm, setShowPackageDeleteConfirm] = useState(false);
+  const [deletingPackage, setDeletingPackage] = useState<MemberPackage | null>(null);
+
+  const [txPackageFilter, setTxPackageFilter] = useState<'all' | 'has_package' | 'no_package'>('all');
+
   useEffect(() => {
     initSampleData();
     refreshData();
@@ -149,6 +172,7 @@ export function App() {
     setInspections(getInspections());
     setMembers(getMembers());
     setTransactions(getMemberTransactions());
+    setMemberPackages(getMemberPackages());
   };
 
   const zones = useMemo(() => {
@@ -212,6 +236,16 @@ export function App() {
       if (txTypeFilter !== 'all' && tx.type !== txTypeFilter) {
         return false;
       }
+      if (txPackageFilter === 'has_package') {
+        if (!tx.packageDeductions || tx.packageDeductions.length === 0) {
+          return false;
+        }
+      }
+      if (txPackageFilter === 'no_package') {
+        if (tx.packageDeductions && tx.packageDeductions.length > 0) {
+          return false;
+        }
+      }
       const txDate = new Date(tx.createdAt).toISOString().split('T')[0];
       if (txStartDate && txDate < txStartDate) {
         return false;
@@ -221,7 +255,7 @@ export function App() {
       }
       return true;
     }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [transactions, txMemberFilter, txTypeFilter, txStartDate, txEndDate]);
+  }, [transactions, txMemberFilter, txTypeFilter, txPackageFilter, txStartDate, txEndDate]);
 
   const getTxIcon = (type: string) => {
     switch (type) {
@@ -234,6 +268,10 @@ export function App() {
         return <ArrowDownCircle className="w-4 h-4 text-red-600" />;
       case 'gift_hours':
         return <Gift className="w-4 h-4 text-blue-600" />;
+      case 'package_purchase':
+        return <Ticket className="w-4 h-4 text-purple-600" />;
+      case 'package_deduct':
+        return <Ticket className="w-4 h-4 text-purple-600" />;
       default:
         return <CreditCard className="w-4 h-4 text-gray-600" />;
     }
@@ -250,6 +288,9 @@ export function App() {
         return 'text-red-600';
       case 'gift_hours':
         return 'text-blue-600';
+      case 'package_purchase':
+      case 'package_deduct':
+        return 'text-purple-600';
       default:
         return 'text-gray-600';
     }
@@ -261,9 +302,11 @@ export function App() {
       case 'refund':
       case 'gift_amount':
       case 'gift_hours':
+      case 'package_purchase':
         return '+';
       case 'deduct':
       case 'consume':
+      case 'package_deduct':
         return '-';
       default:
         return '';
@@ -350,7 +393,20 @@ export function App() {
     if (!result.success) {
       alert(result.message || '结算失败');
     } else {
-      alert(`结算成功，金额：¥${result.amount?.toFixed(2)}`);
+      let msg = `结算成功，总金额：¥${result.amount?.toFixed(2)}`;
+      if (result.settleDetails && result.settleDetails.packageDeductions.length > 0) {
+        msg += '\n\n套餐抵扣明细：';
+        result.settleDetails.packageDeductions.forEach((d) => {
+          const parts = [];
+          if (d.deductedCount > 0) parts.push(`${d.deductedCount}次`);
+          if (d.deductedHours > 0) parts.push(`${d.deductedHours}小时`);
+          msg += `\n  • ${d.packageName}（${parts.join(' / ')}）：-¥${d.deductedAmount.toFixed(2)}`;
+        });
+        if (result.settleDetails.balanceDeduction > 0) {
+          msg += `\n  • 储值余额补扣：-¥${result.settleDetails.balanceDeduction.toFixed(2)}`;
+        }
+      }
+      alert(msg);
       refreshData();
     }
   };
@@ -396,6 +452,7 @@ export function App() {
   const resetTxFilters = () => {
     setTxMemberFilter('all');
     setTxTypeFilter('all');
+    setTxPackageFilter('all');
     setTxStartDate('');
     setTxEndDate('');
   };
@@ -462,6 +519,83 @@ export function App() {
   const handleViewMemberHistory = (member: Member) => {
     setHistoryMember(member);
     setMemberHistoryOpen(true);
+  };
+
+  const handleViewMemberPackages = (member: Member) => {
+    setPackageMember(member);
+    setMemberPackageOpen(true);
+  };
+
+  const handleAddPackage = (member: Member) => {
+    setPackageFormMember(member);
+    setEditingPackage(null);
+    setShowPackageForm(true);
+  };
+
+  const handleEditPackage = (pkg: MemberPackage) => {
+    setEditingPackage(pkg);
+    const member = members.find((m) => m.id === pkg.memberId);
+    setPackageFormMember(member || null);
+    setShowPackageForm(true);
+  };
+
+  const handleDeletePackage = (pkg: MemberPackage) => {
+    setDeletingPackage(pkg);
+    setShowPackageDeleteConfirm(true);
+  };
+
+  const confirmDeletePackage = () => {
+    if (deletingPackage) {
+      deleteMemberPackage(deletingPackage.id);
+      refreshData();
+    }
+    setShowPackageDeleteConfirm(false);
+    setDeletingPackage(null);
+  };
+
+  const handlePackageSubmit = (data: {
+    name: string;
+    type: PackageType;
+    validFrom: string;
+    validTo: string;
+    totalCount: number;
+    totalHours: number;
+    applicableCourtTypes: CourtType[];
+    applicableTimeSlots: string[];
+  }): { success: boolean; message?: string } => {
+    if (!packageFormMember) {
+      return { success: false, message: '请选择会员' };
+    }
+    try {
+      if (editingPackage) {
+        updateMemberPackage(editingPackage.id, {
+          name: data.name,
+          type: data.type,
+          totalCount: data.totalCount,
+          totalHours: data.totalHours,
+          applicableCourtTypes: data.applicableCourtTypes,
+          applicableTimeSlots: data.applicableTimeSlots,
+          validFrom: data.validFrom,
+          validTo: data.validTo,
+        });
+      } else {
+        addMemberPackage({
+          memberId: packageFormMember.id,
+          name: data.name,
+          type: data.type,
+          totalCount: data.totalCount,
+          totalHours: data.totalHours,
+          applicableCourtTypes: data.applicableCourtTypes,
+          applicableTimeSlots: data.applicableTimeSlots,
+          validFrom: data.validFrom,
+          validTo: data.validTo,
+        });
+      }
+      refreshData();
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, message: e.message || '保存失败' };
+    }
   };
 
   const courtBookings = selectedCourt ? getBookingsByCourt(selectedCourt.id) : [];
@@ -757,15 +891,20 @@ export function App() {
                             <td className="px-4 py-3 text-sm text-gray-700">{booking.date}</td>
                             <td className="px-4 py-3 text-sm text-gray-700">
                               {booking.startTime} - {booking.endTime}
-                              {hasChanges && (
+                              {(hasChanges || (booking.settled && booking.settleDetails)) && (
                                 <span className="ml-2 text-emerald-600 text-xs">
                                   <button
                                     onClick={() => toggleBookingExpand(booking.id)}
                                     className="inline-flex items-center gap-1 align-middle"
-                                    title="查看变更历史"
+                                    title={hasChanges ? '查看变更历史和抵扣明细' : '查看抵扣明细'}
                                   >
-                                    <History className="w-3.5 h-3.5" />
-                                    改期{booking.changeHistory!.length}次
+                                    {hasChanges ? (
+                                      <History className="w-3.5 h-3.5" />
+                                    ) : (
+                                      <Ticket className="w-3.5 h-3.5 text-purple-600" />
+                                    )}
+                                    {hasChanges && <span>改期{booking.changeHistory!.length}次</span>}
+                                    {!hasChanges && booking.settleDetails && <span className="text-purple-600">已抵扣</span>}
                                     {isExpanded ? (
                                       <ChevronUp className="w-3.5 h-3.5" />
                                     ) : (
@@ -829,35 +968,79 @@ export function App() {
                               </div>
                             </td>
                           </tr>
-                          {isExpanded && hasChanges && (
-                            <tr key={`${booking.id}-history`} className="bg-gray-50">
+                          {isExpanded && (hasChanges || (booking.settled && booking.settleDetails)) && (
+                            <tr key={`${booking.id}-details`} className="bg-gray-50">
                               <td colSpan={10} className="px-4 py-3">
-                                <div className="space-y-2">
-                                  <p className="text-xs font-medium text-gray-600 flex items-center gap-1">
-                                    <History className="w-3.5 h-3.5" />
-                                    变更历史
-                                  </p>
-                                  <div className="space-y-2">
-                                    {[...booking.changeHistory!].reverse().map((change) => (
-                                      <div
-                                        key={change.id}
-                                        className="bg-white border border-gray-200 rounded-md p-3 text-xs text-gray-600"
-                                      >
-                                        <p className="text-gray-500 mb-1">
-                                          {new Date(change.changedAt).toLocaleString('zh-CN')}
-                                        </p>
-                                        <div className="flex items-center gap-2">
+                                <div className="space-y-4">
+                                  {booking.settled && booking.settleDetails && booking.settleDetails.packageDeductions.length > 0 && (
+                                    <div className="space-y-2">
+                                      <p className="text-xs font-medium text-purple-700 flex items-center gap-1">
+                                        <Ticket className="w-3.5 h-3.5" />
+                                        套餐抵扣明细
+                                      </p>
+                                      <div className="bg-white border border-purple-200 rounded-md p-3 space-y-2">
+                                        {booking.settleDetails.packageDeductions.map((d, i) => (
+                                          <div key={i} className="flex justify-between text-xs">
+                                            <span className="text-gray-700">
+                                              🎟️ {d.packageName}
+                                              {d.deductedCount > 0 && <span className="ml-2">{d.deductedCount}次</span>}
+                                              {d.deductedHours > 0 && <span className="ml-2">{d.deductedHours}小时</span>}
+                                            </span>
+                                            <span className="text-purple-600 font-medium">
+                                              -¥{d.deductedAmount.toFixed(2)}
+                                            </span>
+                                          </div>
+                                        ))}
+                                        {booking.settleDetails.balanceDeduction > 0 && (
+                                          <div className="flex justify-between text-xs pt-2 border-t border-gray-100">
+                                            <span className="text-gray-700">💰 储值余额补扣</span>
+                                            <span className="text-amber-600 font-medium">
+                                              -¥{booking.settleDetails.balanceDeduction.toFixed(2)}
+                                            </span>
+                                          </div>
+                                        )}
+                                        <div className="flex justify-between text-xs pt-2 border-t border-gray-200 font-medium">
+                                          <span className="text-gray-900">合计</span>
                                           <span className="text-red-600">
-                                            {change.previousDate} {change.previousStartTime}-{change.previousEndTime}
-                                          </span>
-                                          <span className="text-gray-400">→</span>
-                                          <span className="text-emerald-600 font-medium">
-                                            {change.newDate} {change.newStartTime}-{change.newEndTime}
+                                            -¥{(
+                                              booking.settleDetails.packageDeductions.reduce((sum, d) => sum + d.deductedAmount, 0) +
+                                              booking.settleDetails.balanceDeduction
+                                            ).toFixed(2)}
                                           </span>
                                         </div>
                                       </div>
-                                    ))}
-                                  </div>
+                                    </div>
+                                  )}
+
+                                  {hasChanges && (
+                                    <div className="space-y-2">
+                                      <p className="text-xs font-medium text-gray-600 flex items-center gap-1">
+                                        <History className="w-3.5 h-3.5" />
+                                        变更历史
+                                      </p>
+                                      <div className="space-y-2">
+                                        {[...booking.changeHistory!].reverse().map((change) => (
+                                          <div
+                                            key={change.id}
+                                            className="bg-white border border-gray-200 rounded-md p-3 text-xs text-gray-600"
+                                          >
+                                            <p className="text-gray-500 mb-1">
+                                              {new Date(change.changedAt).toLocaleString('zh-CN')}
+                                            </p>
+                                            <div className="flex items-center gap-2">
+                                              <span className="text-red-600">
+                                                {change.previousDate} {change.previousStartTime}-{change.previousEndTime}
+                                              </span>
+                                              <span className="text-gray-400">→</span>
+                                              <span className="text-emerald-600 font-medium">
+                                                {change.newDate} {change.newStartTime}-{change.newEndTime}
+                                              </span>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                               </td>
                             </tr>
@@ -1028,6 +1211,19 @@ export function App() {
                               交易
                             </button>
                             <button
+                              className="text-purple-600 hover:text-purple-700 text-sm inline-flex items-center gap-1"
+                              onClick={() => handleViewMemberPackages(member)}
+                              title="查看套餐"
+                            >
+                              <Ticket className="w-4 h-4" />
+                              套餐
+                              {memberPackages.filter((p) => p.memberId === member.id).length > 0 && (
+                                <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full">
+                                  {memberPackages.filter((p) => p.memberId === member.id).length}
+                                </span>
+                              )}
+                            </button>
+                            <button
                               className="text-blue-600 hover:text-blue-700 text-sm inline-flex items-center gap-1"
                               onClick={() => handleEditMember(member)}
                             >
@@ -1089,6 +1285,18 @@ export function App() {
                         {label}
                       </option>
                     ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">套餐抵扣</label>
+                  <select
+                    className="input min-w-[140px]"
+                    value={txPackageFilter}
+                    onChange={(e) => setTxPackageFilter((e.target as HTMLSelectElement).value as 'all' | 'has_package' | 'no_package')}
+                  >
+                    <option value="all">全部</option>
+                    <option value="has_package">含套餐抵扣</option>
+                    <option value="no_package">无套餐抵扣</option>
                   </select>
                 </div>
                 <div>
@@ -1181,8 +1389,27 @@ export function App() {
                           <td className="px-4 py-3 text-sm text-gray-600">
                             ¥{tx.beforeBalance.toFixed(2)} → ¥{tx.afterBalance.toFixed(2)}
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-500">
-                            {tx.remark || '-'}
+                          <td className="px-4 py-3 text-sm">
+                            {tx.packageDeductions && tx.packageDeductions.length > 0 ? (
+                              <div className="space-y-1">
+                                {tx.packageDeductions.map((d, i) => (
+                                  <div key={i} className="text-xs text-purple-600">
+                                    🎟️ {d.packageName}：
+                                    {d.deductedCount > 0 && <span>{d.deductedCount}次 </span>}
+                                    {d.deductedHours > 0 && <span>{d.deductedHours}小时 </span>}
+                                    (-¥{d.deductedAmount.toFixed(2)})
+                                  </div>
+                                ))}
+                                {tx.balanceDeduction && tx.balanceDeduction > 0 && (
+                                  <div className="text-xs text-amber-600">
+                                    💰 余额补扣：¥{tx.balanceDeduction.toFixed(2)}
+                                  </div>
+                                )}
+                                {tx.remark && <div className="text-xs text-gray-500 mt-1">{tx.remark}</div>}
+                              </div>
+                            ) : (
+                              <span className="text-gray-500">{tx.remark || '-'}</span>
+                            )}
                           </td>
                         </tr>
                       );
@@ -1498,6 +1725,92 @@ export function App() {
         }}
         member={historyMember}
         transactions={historyMemberTransactions}
+        packages={historyMember ? getPackagesByMember(historyMember.id) : []}
+        onViewPackages={() => {
+          if (historyMember) {
+            setMemberHistoryOpen(false);
+            setHistoryMember(null);
+            handleViewMemberPackages(historyMember);
+          }
+        }}
+      />
+
+      <Modal
+        open={showPackageForm && !!packageFormMember}
+        onClose={() => {
+          setShowPackageForm(false);
+          setPackageFormMember(null);
+          setEditingPackage(null);
+        }}
+        title={editingPackage ? '编辑套餐' : '开通套餐'}
+      >
+        {packageFormMember && (
+          <PackageForm
+            memberId={packageFormMember.id}
+            memberName={packageFormMember.name}
+            existingPackage={editingPackage || undefined}
+            onSubmit={(data) => {
+              const result = handlePackageSubmit(data);
+              if (result.success) {
+                setShowPackageForm(false);
+                setPackageFormMember(null);
+                setEditingPackage(null);
+              } else {
+                alert(result.message || '保存失败');
+              }
+            }}
+            onCancel={() => {
+              setShowPackageForm(false);
+              setPackageFormMember(null);
+              setEditingPackage(null);
+            }}
+          />
+        )}
+      </Modal>
+
+      <Modal
+        open={showPackageDeleteConfirm}
+        onClose={() => {
+          setShowPackageDeleteConfirm(false);
+          setDeletingPackage(null);
+        }}
+        title="确认删除套餐"
+      >
+        <p className="text-sm text-gray-600 mb-6">
+          确定要删除套餐 <span className="font-medium text-gray-900">{deletingPackage?.name}</span> 吗？
+          此操作不可撤销。
+        </p>
+        <div className="flex justify-end gap-3">
+          <button
+            className="btn-secondary"
+            onClick={() => {
+              setShowPackageDeleteConfirm(false);
+              setDeletingPackage(null);
+            }}
+          >
+            取消
+          </button>
+          <button className="btn-danger" onClick={confirmDeletePackage}>
+            确认删除
+          </button>
+        </div>
+      </Modal>
+
+      <MemberPackageDrawer
+        open={memberPackageOpen}
+        onClose={() => {
+          setMemberPackageOpen(false);
+          setPackageMember(null);
+        }}
+        member={packageMember}
+        packages={packageMember ? getPackagesByMember(packageMember.id) : []}
+        onAddPackage={() => {
+          if (packageMember) {
+            handleAddPackage(packageMember);
+          }
+        }}
+        onEditPackage={handleEditPackage}
+        onDeletePackage={handleDeletePackage}
       />
     </div>
   );

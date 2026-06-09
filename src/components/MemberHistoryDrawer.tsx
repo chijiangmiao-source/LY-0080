@@ -1,14 +1,18 @@
+import { useMemo } from 'preact/hooks';
 import * as Dialog from '@radix-ui/react-dialog';
-import { X, ArrowUpCircle, ArrowDownCircle, Gift, CreditCard } from 'lucide-preact';
-import type { Member, MemberTransaction } from '../types';
+import { X, ArrowUpCircle, ArrowDownCircle, Gift, CreditCard, Ticket, Zap, Banknote, AlertCircle } from 'lucide-preact';
+import type { Member, MemberTransaction, MemberPackage } from '../types';
 import { TRANSACTION_TYPE_LABEL, MEMBER_LEVEL_LABEL, MEMBER_STATUS_LABEL } from '../types';
 import { formatDate } from '../lib/utils';
+import { getTodayPackageConsumption, getTodayBalanceSupplement, getMemberExpiringPackages, getPackageStatus } from '../lib/storage';
 
 interface MemberHistoryDrawerProps {
   open: boolean;
   onClose: () => void;
   member: Member | null;
   transactions: MemberTransaction[];
+  packages?: MemberPackage[];
+  onViewPackages?: () => void;
 }
 
 const getTransactionIcon = (type: string) => {
@@ -58,12 +62,29 @@ const getAmountPrefix = (type: string) => {
   }
 };
 
-export function MemberHistoryDrawer({ open, onClose, member, transactions }: MemberHistoryDrawerProps) {
+export function MemberHistoryDrawer({ open, onClose, member, transactions, packages, onViewPackages }: MemberHistoryDrawerProps) {
   if (!member) return null;
 
   const sortedTransactions = [...transactions].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
+
+  const todayConsumption = useMemo(() => {
+    return getTodayPackageConsumption(member.id);
+  }, [member, transactions]);
+
+  const todayBalanceSupplement = useMemo(() => {
+    return getTodayBalanceSupplement(member.id);
+  }, [member, transactions]);
+
+  const expiringPackages = useMemo(() => {
+    return getMemberExpiringPackages(member.id, 7);
+  }, [member, packages]);
+
+  const activePackages = useMemo(() => {
+    if (!packages) return [];
+    return packages.filter((p) => getPackageStatus(p) === 'active');
+  }, [packages]);
 
   return (
     <Dialog.Root open={open} onOpenChange={onClose}>
@@ -121,6 +142,49 @@ export function MemberHistoryDrawer({ open, onClose, member, transactions }: Mem
               </div>
             </div>
 
+            <div className="grid grid-cols-3 gap-2 mt-3">
+              <div className="bg-white p-2.5 rounded-md border border-gray-200">
+                <div className="flex items-center gap-1 text-xs text-gray-500">
+                  <Zap className="w-3 h-3 text-emerald-600" />
+                  今日套餐消耗
+                </div>
+                <div className="text-sm font-semibold text-gray-900 mt-0.5">
+                  {todayConsumption.totalCount > 0 && <span>{todayConsumption.totalCount}次</span>}
+                  {todayConsumption.totalCount > 0 && todayConsumption.totalHours > 0 && <span className="text-gray-400 mx-1">/</span>}
+                  {todayConsumption.totalHours > 0 && <span>{todayConsumption.totalHours}h</span>}
+                  {todayConsumption.totalCount === 0 && todayConsumption.totalHours === 0 && <span className="text-gray-400">-</span>}
+                </div>
+              </div>
+              <div className="bg-white p-2.5 rounded-md border border-gray-200">
+                <div className="flex items-center gap-1 text-xs text-gray-500">
+                  <Banknote className="w-3 h-3 text-orange-600" />
+                  今日余额补扣
+                </div>
+                <div className="text-sm font-semibold text-orange-600 mt-0.5">
+                  ¥{todayBalanceSupplement.toFixed(2)}
+                </div>
+              </div>
+              <div className="bg-white p-2.5 rounded-md border border-gray-200">
+                <div className="flex items-center gap-1 text-xs text-gray-500">
+                  <AlertCircle className="w-3 h-3 text-amber-600" />
+                  即将到期
+                </div>
+                <div className="text-sm font-semibold text-amber-600 mt-0.5">
+                  {expiringPackages.length} 个
+                </div>
+              </div>
+            </div>
+
+            {activePackages.length > 0 && onViewPackages && (
+              <button
+                onClick={onViewPackages}
+                className="mt-3 w-full flex items-center justify-center gap-2 py-2 bg-white border border-purple-200 rounded-md text-sm text-purple-700 hover:bg-purple-50"
+              >
+                <Ticket className="w-4 h-4" />
+                查看 {activePackages.length} 个有效套餐
+              </button>
+            )}
+
             <div className="mt-3 text-xs text-gray-500">
               开卡日期：{formatDate(member.createdAt)}
               {member.note && <span className="ml-3">备注：{member.note}</span>}
@@ -162,6 +226,33 @@ export function MemberHistoryDrawer({ open, onClose, member, transactions }: Mem
                       </p>
                       {tx.remark && (
                         <p className="text-xs text-gray-500 mt-1">备注：{tx.remark}</p>
+                      )}
+                      {tx.packageDeductions && tx.packageDeductions.length > 0 && (
+                        <div className="mt-1.5 p-2 bg-purple-50 rounded-md border border-purple-100">
+                          <p className="text-xs font-medium text-purple-700 mb-1">套餐抵扣明细：</p>
+                          <div className="space-y-0.5">
+                            {tx.packageDeductions.map((d, idx) => (
+                              <div key={idx} className="flex justify-between text-xs text-gray-600">
+                                <span>
+                                  <Ticket className="w-3 h-3 inline mr-0.5 text-purple-500" />
+                                  {d.packageName}
+                                  {d.deductedCount > 0 && <span className="ml-1">-{d.deductedCount}次</span>}
+                                  {d.deductedHours > 0 && <span className="ml-1">-{d.deductedHours}h</span>}
+                                </span>
+                                <span className="text-emerald-600 font-medium">-¥{d.deductedAmount.toFixed(2)}</span>
+                              </div>
+                            ))}
+                          </div>
+                          {tx.balanceDeduction && tx.balanceDeduction > 0 && (
+                            <div className="flex justify-between text-xs text-gray-600 mt-1 pt-1 border-t border-purple-200">
+                              <span>
+                                <CreditCard className="w-3 h-3 inline mr-0.5 text-orange-500" />
+                                储值余额补扣
+                              </span>
+                              <span className="text-orange-600 font-medium">-¥{tx.balanceDeduction.toFixed(2)}</span>
+                            </div>
+                          )}
+                        </div>
                       )}
                       <p className="text-xs text-gray-400 mt-1">
                         余额变动：¥{tx.beforeBalance.toFixed(2)} → ¥{tx.afterBalance.toFixed(2)}

@@ -1,7 +1,8 @@
-import { useState } from 'preact/hooks';
-import type { Booking, Court } from '../types';
-import { getTodayStr, isDateBeforeToday, isEndTimeBeforeStart } from '../lib/utils';
-import { isTimeSlotConflict } from '../lib/storage';
+import { useState, useMemo } from 'preact/hooks';
+import type { Booking, Court, Member } from '../types';
+import { getTodayStr, isDateBeforeToday, isEndTimeBeforeStart, calculateBookingAmount } from '../lib/utils';
+import { isTimeSlotConflict, previewBookingDeduction, getMemberById } from '../lib/storage';
+import { Sparkles, Ticket, Wallet } from 'lucide-preact';
 
 interface RescheduleFormProps {
   booking: Booking;
@@ -20,6 +21,29 @@ export function RescheduleForm({ booking, courts, onSubmit, onCancel }: Reschedu
     endTime: booking.endTime,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const bookingMember: Member | undefined = useMemo(() => {
+    if (!booking.memberId) return undefined;
+    return getMemberById(booking.memberId);
+  }, [booking.memberId]);
+
+  const deductionPreview = useMemo(() => {
+    if (!bookingMember || !court || !formData.date || !formData.startTime || !formData.endTime) {
+      return null;
+    }
+    return previewBookingDeduction(
+      bookingMember.id,
+      court.type,
+      formData.date,
+      formData.startTime,
+      formData.endTime
+    );
+  }, [bookingMember, court, formData.date, formData.startTime, formData.endTime]);
+
+  const estimatedAmount = useMemo(() => {
+    if (!court || !formData.startTime || !formData.endTime) return 0;
+    return calculateBookingAmount(formData.startTime, formData.endTime, court.type);
+  }, [court, formData.startTime, formData.endTime]);
 
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
@@ -146,6 +170,52 @@ export function RescheduleForm({ booking, courts, onSubmit, onCancel }: Reschedu
           {errors.endTime && <p className="text-red-500 text-xs mt-1">{errors.endTime}</p>}
         </div>
       </div>
+
+      {bookingMember && deductionPreview && court && (
+        <div className="p-3 bg-gradient-to-r from-purple-50 to-blue-50 rounded-md border border-purple-100">
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles className="w-4 h-4 text-purple-600" />
+            <span className="text-sm font-medium text-purple-700">改期后套餐抵扣预估</span>
+            <span className="text-xs text-gray-500 ml-auto">总计 ¥{estimatedAmount.toFixed(2)}</span>
+          </div>
+          <div className="space-y-1 text-xs">
+            {deductionPreview.packageDeductions.length > 0 ? (
+              deductionPreview.packageDeductions.map((d, idx) => (
+                <div key={idx} className="flex items-center justify-between">
+                  <span className="text-gray-600">
+                    <Ticket className="w-3 h-3 inline mr-1 text-purple-500" />
+                    {d.packageName}
+                    {d.deductedCount > 0 && <span className="ml-1">-{d.deductedCount}次</span>}
+                    {d.deductedHours > 0 && <span className="ml-1">-{d.deductedHours}h</span>}
+                  </span>
+                  <span className="font-medium text-emerald-600">
+                    -¥{d.deductedAmount.toFixed(2)}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <p className="text-gray-500">改期后当前时段无可用套餐</p>
+            )}
+            {deductionPreview.balanceDeduction > 0 && (
+              <div className="flex items-center justify-between pt-1 border-t border-purple-100">
+                <span className="text-gray-600">
+                  <Wallet className="w-3 h-3 inline mr-1 text-orange-500" />
+                  储值余额补扣
+                </span>
+                <span className="font-medium text-orange-600">
+                  -¥{deductionPreview.balanceDeduction.toFixed(2)}
+                </span>
+              </div>
+            )}
+            <div className="flex items-center justify-between pt-1 font-medium">
+              <span className="text-gray-700">结算时应付</span>
+              <span className="text-purple-700">
+                ¥{deductionPreview.balanceDeduction.toFixed(2)}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {booking.changeHistory && booking.changeHistory.length > 0 && (
         <div className="card p-4">

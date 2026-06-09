@@ -1,9 +1,16 @@
 import { useState, useMemo } from 'preact/hooks';
 import type { Booking, Court, Member } from '../types';
-import { MEMBER_LEVEL_LABEL } from '../types';
-import { getTodayStr, isDateBeforeToday, isEndTimeBeforeStart } from '../lib/utils';
-import { isTimeSlotConflict, getMemberByPhone, getMembers } from '../lib/storage';
-import { Search, User, Wallet, AlertTriangle, CheckCircle } from 'lucide-preact';
+import { MEMBER_LEVEL_LABEL, PACKAGE_TYPE_LABEL } from '../types';
+import { getTodayStr, isDateBeforeToday, isEndTimeBeforeStart, calculateBookingAmount } from '../lib/utils';
+import {
+  isTimeSlotConflict,
+  getMemberByPhone,
+  getMembers,
+  previewBookingDeduction,
+  isPackageApplicable,
+  getPackagesByMember,
+} from '../lib/storage';
+import { Search, User, Wallet, AlertTriangle, CheckCircle, Ticket, Sparkles } from 'lucide-preact';
 
 interface BookingFormProps {
   courts: Court[];
@@ -48,6 +55,37 @@ export function BookingForm({ courts, selectedCourtId, onSubmit, onCancel }: Boo
     const members = getMembers();
     return members.find((m) => m.id === formData.memberId) || null;
   }, [formData.memberId]);
+
+  const selectedCourt = useMemo(() => {
+    return courts.find((c) => c.id === formData.courtId) || null;
+  }, [formData.courtId, courts]);
+
+  const deductionPreview = useMemo(() => {
+    if (!selectedMember || !selectedCourt || !formData.date || !formData.startTime || !formData.endTime) {
+      return null;
+    }
+    return previewBookingDeduction(
+      selectedMember.id,
+      selectedCourt.type,
+      formData.date,
+      formData.startTime,
+      formData.endTime
+    );
+  }, [selectedMember, selectedCourt, formData.date, formData.startTime, formData.endTime]);
+
+  const applicablePackages = useMemo(() => {
+    if (!selectedMember || !selectedCourt || !formData.date || !formData.startTime || !formData.endTime) {
+      return [];
+    }
+    return getPackagesByMember(selectedMember.id).filter((p) =>
+      isPackageApplicable(p, selectedCourt.type, formData.date, formData.startTime, formData.endTime)
+    );
+  }, [selectedMember, selectedCourt, formData.date, formData.startTime, formData.endTime]);
+
+  const estimatedAmount = useMemo(() => {
+    if (!selectedCourt || !formData.startTime || !formData.endTime) return 0;
+    return calculateBookingAmount(formData.startTime, formData.endTime, selectedCourt.type);
+  }, [selectedCourt, formData.startTime, formData.endTime]);
 
   const handlePhoneSearch = (text: string) => {
     setPhoneSearchText(text);
@@ -273,12 +311,81 @@ export function BookingForm({ courts, selectedCourtId, onSubmit, onCancel }: Boo
           </div>
         )}
 
-        {selectedMember && selectedMember.balance === 0 && (
+        {selectedMember && selectedMember.balance === 0 && deductionPreview && deductionPreview.balanceDeduction > 0 && (
           <div className="flex items-start gap-2 p-3 bg-amber-50 rounded-md border border-amber-200">
             <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
             <div>
               <p className="text-sm font-medium text-amber-800">余额不足提醒</p>
-              <p className="text-xs text-amber-700">该会员当前余额为0，请提醒会员充值后消费。</p>
+              <p className="text-xs text-amber-700">
+                套餐抵扣后还需 ¥{deductionPreview.balanceDeduction.toFixed(2)}，当前余额为¥{selectedMember.balance.toFixed(2)}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {selectedMember && deductionPreview && (
+          <div className="p-3 bg-gradient-to-r from-purple-50 to-blue-50 rounded-md border border-purple-100">
+            <div className="flex items-center gap-2 mb-2">
+              <Sparkles className="w-4 h-4 text-purple-600" />
+              <span className="text-sm font-medium text-purple-700">套餐自动抵扣预估</span>
+              <span className="text-xs text-gray-500 ml-auto">总计 ¥{estimatedAmount.toFixed(2)}</span>
+            </div>
+            {applicablePackages.length > 0 && (
+              <div className="mb-2">
+                <p className="text-xs text-gray-500 mb-1">可用套餐：</p>
+                <div className="flex flex-wrap gap-1">
+                  {applicablePackages.slice(0, 3).map((pkg) => (
+                    <span key={pkg.id} className="badge bg-white text-purple-700 border border-purple-200 text-xs">
+                      <Ticket className="w-3 h-3 inline mr-0.5" />
+                      {pkg.name}
+                      <span className="text-gray-400 ml-1">
+                        ({PACKAGE_TYPE_LABEL[pkg.type]})
+                      </span>
+                    </span>
+                  ))}
+                  {applicablePackages.length > 3 && (
+                    <span className="text-xs text-gray-400 self-center">
+                      +{applicablePackages.length - 3} 个
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+            <div className="space-y-1 text-xs">
+              {deductionPreview.packageDeductions.length > 0 ? (
+                deductionPreview.packageDeductions.map((d, idx) => (
+                  <div key={idx} className="flex items-center justify-between">
+                    <span className="text-gray-600">
+                      <Ticket className="w-3 h-3 inline mr-1 text-purple-500" />
+                      {d.packageName}
+                      {d.deductedCount > 0 && <span className="ml-1">-{d.deductedCount}次</span>}
+                      {d.deductedHours > 0 && <span className="ml-1">-{d.deductedHours}h</span>}
+                    </span>
+                    <span className="font-medium text-emerald-600">
+                      -¥{d.deductedAmount.toFixed(2)}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <p className="text-gray-500">当前时段无可用套餐</p>
+              )}
+              {deductionPreview.balanceDeduction > 0 && (
+                <div className="flex items-center justify-between pt-1 border-t border-purple-100">
+                  <span className="text-gray-600">
+                    <Wallet className="w-3 h-3 inline mr-1 text-orange-500" />
+                    储值余额补扣
+                  </span>
+                  <span className="font-medium text-orange-600">
+                    -¥{deductionPreview.balanceDeduction.toFixed(2)}
+                  </span>
+                </div>
+              )}
+              <div className="flex items-center justify-between pt-1 font-medium">
+                <span className="text-gray-700">结算时应付</span>
+                <span className="text-purple-700">
+                  ¥{deductionPreview.balanceDeduction.toFixed(2)}
+                </span>
+              </div>
             </div>
           </div>
         )}

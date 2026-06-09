@@ -1,11 +1,31 @@
-import type { Court, Booking, Inspection, BookingChange, Member, MemberTransaction, TransactionType } from '../types';
-import { getBookingProgressStatus, getTodayStr, calculateBookingAmount, getLowestCourtPrice } from './utils';
+import type {
+  Court,
+  Booking,
+  Inspection,
+  BookingChange,
+  Member,
+  MemberTransaction,
+  TransactionType,
+  MemberPackage,
+  PackageType,
+  PackageDeductionDetail,
+  BookingSettleDetails,
+  CourtType,
+} from '../types';
+import {
+  getBookingProgressStatus,
+  getTodayStr,
+  calculateBookingAmount,
+  getLowestCourtPrice,
+  getBookingDurationHours,
+} from './utils';
 
 const COURTS_KEY = 'badminton_courts';
 const BOOKINGS_KEY = 'badminton_bookings';
 const INSPECTIONS_KEY = 'badminton_inspections';
 const MEMBERS_KEY = 'badminton_members';
 const MEMBER_TRANSACTIONS_KEY = 'badminton_member_transactions';
+const MEMBER_PACKAGES_KEY = 'badminton_member_packages';
 
 function getFromStorage<T>(key: string): T[] {
   try {
@@ -287,12 +307,25 @@ interface CreateTransactionParams {
   hours?: number;
   remark?: string;
   relatedBookingId?: string;
+  relatedPackageId?: string;
+  packageDeductions?: PackageDeductionDetail[];
+  balanceDeduction?: number;
 }
 
 export const createMemberTransaction = (
   params: CreateTransactionParams
 ): { success: boolean; message?: string; transaction?: MemberTransaction } => {
-  const { memberId, type, amount = 0, hours = 0, remark, relatedBookingId } = params;
+  const {
+    memberId,
+    type,
+    amount = 0,
+    hours = 0,
+    remark,
+    relatedBookingId,
+    relatedPackageId,
+    packageDeductions,
+    balanceDeduction,
+  } = params;
   const members = getMembers();
   const memberIndex = members.findIndex((m) => m.id === memberId);
 
@@ -326,6 +359,9 @@ export const createMemberTransaction = (
       }
       afterBalance = beforeBalance - amount;
       break;
+    case 'package_purchase':
+    case 'package_deduct':
+      break;
   }
 
   const transactions = getMemberTransactions();
@@ -341,6 +377,9 @@ export const createMemberTransaction = (
     afterHours,
     remark,
     relatedBookingId,
+    relatedPackageId,
+    packageDeductions,
+    balanceDeduction,
     createdAt: new Date().toISOString(),
   };
   transactions.push(transaction);
@@ -387,7 +426,257 @@ export interface SettleBookingResult {
   success: boolean;
   message?: string;
   amount?: number;
+  settleDetails?: BookingSettleDetails;
 }
+
+// ==================== Member Packages ====================
+
+export const getMemberPackages = (): MemberPackage[] =>
+  getFromStorage<MemberPackage>(MEMBER_PACKAGES_KEY);
+
+export const saveMemberPackages = (packages: MemberPackage[]): void =>
+  saveToStorage(MEMBER_PACKAGES_KEY, packages);
+
+export const getPackagesByMember = (memberId: string): MemberPackage[] => {
+  return getMemberPackages().filter((p) => p.memberId === memberId);
+};
+
+export const getPackageById = (id: string): MemberPackage | undefined => {
+  return getMemberPackages().find((p) => p.id === id);
+};
+
+export const getPackageStatus = (pkg: MemberPackage): 'active' | 'expired' | 'depleted' => {
+  const today = getTodayStr();
+  if (pkg.validTo < today) return 'expired';
+  const remainingCount = pkg.totalCount - pkg.usedCount;
+  const remainingHours = pkg.totalHours - pkg.usedHours;
+  if (
+    (pkg.type === 'count' && remainingCount <= 0) ||
+    (pkg.type === 'hourly' && remainingHours <= 0) ||
+    (pkg.type === 'time_slot' && remainingCount <= 0 && remainingHours <= 0)
+  ) {
+    return 'depleted';
+  }
+  return 'active';
+};
+
+export const isPackageApplicable = (
+  pkg: MemberPackage,
+  courtType: CourtType,
+  date: string,
+  startTime: string,
+  endTime: string
+): boolean => {
+  if (getPackageStatus(pkg) !== 'active') return false;
+  if (pkg.validFrom > date || pkg.validTo < date) return false;
+  if (pkg.applicableCourtTypes.length > 0 && !pkg.applicableCourtTypes.includes(courtType)) {
+    return false;
+  }
+  if (pkg.applicableTimeSlots.length > 0) {
+    const bookingStartMinutes = timeToMinutes(startTime);
+    const bookingEndMinutes = timeToMinutes(endTime);
+    const fitsInSlot = pkg.applicableTimeSlots.some((slot) => {
+      const [slotStart, slotEnd] = slot.split('-');
+      const slotStartMin = timeToMinutes(slotStart);
+      const slotEndMin = timeToMinutes(slotEnd);
+      return bookingStartMinutes >= slotStartMin && bookingEndMinutes <= slotEndMin;
+    });
+    if (!fitsInSlot) return false;
+  }
+  return true;
+};
+
+const timeToMinutes = (time: string): number => {
+  const [h, m] = time.split(':').map(Number);
+  return h * 60 + m;
+};
+
+interface NewPackageInput {
+  memberId: string;
+  name: string;
+  type: PackageType;
+  totalCount: number;
+  totalHours: number;
+  applicableCourtTypes: CourtType[];
+  applicableTimeSlots: string[];
+  validFrom: string;
+  validTo: string;
+}
+
+export const addMemberPackage = (input: NewPackageInput): MemberPackage => {
+  const packages = getMemberPackages();
+  const newPackage: MemberPackage = {
+    ...input,
+    usedCount: 0,
+    usedHours: 0,
+    id: generateId(),
+    createdAt: new Date().toISOString(),
+  };
+  packages.push(newPackage);
+  saveMemberPackages(packages);
+
+  const purchaseAmount = 0;
+  createMemberTransaction({
+    memberId: input.memberId,
+    type: 'package_purchase',
+    amount: purchaseAmount,
+    remark: `开通套餐：${input.name}`,
+    relatedPackageId: newPackage.id,
+  });
+
+  return newPackage;
+};
+
+export const updateMemberPackage = (
+  id: string,
+  updates: Partial<MemberPackage>
+): MemberPackage | null => {
+  const packages = getMemberPackages();
+  const index = packages.findIndex((p) => p.id === id);
+  if (index === -1) return null;
+  packages[index] = { ...packages[index], ...updates };
+  saveMemberPackages(packages);
+  return packages[index];
+};
+
+export const deleteMemberPackage = (id: string): boolean => {
+  const packages = getMemberPackages();
+  const filtered = packages.filter((p) => p.id !== id);
+  if (filtered.length === packages.length) return false;
+  saveMemberPackages(filtered);
+  return true;
+};
+
+// ==================== Package Deduction Logic ====================
+
+export interface DeductionPreview {
+  packageDeductions: PackageDeductionDetail[];
+  balanceDeduction: number;
+  totalAmount: number;
+  remainingCountNeed: number;
+  remainingHoursNeed: number;
+}
+
+export const previewBookingDeduction = (
+  memberId: string,
+  courtType: CourtType,
+  date: string,
+  startTime: string,
+  endTime: string
+): DeductionPreview => {
+  const totalAmount = calculateBookingAmount(startTime, endTime, courtType);
+  const durationHours = getBookingDurationHours(startTime, endTime);
+
+  const result: DeductionPreview = {
+    packageDeductions: [],
+    balanceDeduction: 0,
+    totalAmount,
+    remainingCountNeed: 1,
+    remainingHoursNeed: durationHours,
+  };
+
+  const member = getMemberById(memberId);
+  if (!member) {
+    result.balanceDeduction = totalAmount;
+    return result;
+  }
+
+  const packages = getPackagesByMember(memberId)
+    .filter((p) => isPackageApplicable(p, courtType, date, startTime, endTime))
+    .sort((a, b) => {
+      const typeOrder: Record<PackageType, number> = { time_slot: 0, count: 1, hourly: 2 };
+      if (typeOrder[a.type] !== typeOrder[b.type]) {
+        return typeOrder[a.type] - typeOrder[b.type];
+      }
+      return new Date(a.validTo).getTime() - new Date(b.validTo).getTime();
+    });
+
+  let amountCovered = 0;
+
+  for (const pkg of packages) {
+    const remainingCount = pkg.totalCount - pkg.usedCount;
+    const remainingHours = pkg.totalHours - pkg.usedHours;
+    let deductCount = 0;
+    let deductHours = 0;
+
+    if (pkg.type === 'count' && remainingCount > 0 && result.remainingCountNeed > 0) {
+      deductCount = Math.min(remainingCount, result.remainingCountNeed);
+      result.remainingCountNeed -= deductCount;
+      const pkgAmount = (deductCount / 1) * totalAmount;
+      amountCovered += pkgAmount;
+      result.packageDeductions.push({
+        packageId: pkg.id,
+        packageName: pkg.name,
+        packageType: pkg.type,
+        deductedCount: deductCount,
+        deductedHours: 0,
+        deductedAmount: Math.round(pkgAmount * 100) / 100,
+      });
+    } else if (pkg.type === 'hourly' && remainingHours > 0 && result.remainingHoursNeed > 0) {
+      deductHours = Math.min(remainingHours, result.remainingHoursNeed);
+      result.remainingHoursNeed -= deductHours;
+      const pricePerHour = totalAmount / durationHours;
+      const pkgAmount = deductHours * pricePerHour;
+      amountCovered += pkgAmount;
+      result.packageDeductions.push({
+        packageId: pkg.id,
+        packageName: pkg.name,
+        packageType: pkg.type,
+        deductedCount: 0,
+        deductedHours: deductHours,
+        deductedAmount: Math.round(pkgAmount * 100) / 100,
+      });
+    } else if (pkg.type === 'time_slot' && (remainingCount > 0 || remainingHours > 0)) {
+      if (remainingCount > 0 && result.remainingCountNeed > 0) {
+        deductCount = Math.min(remainingCount, result.remainingCountNeed);
+        result.remainingCountNeed -= deductCount;
+      }
+      if (remainingHours > 0 && result.remainingHoursNeed > 0) {
+        deductHours = Math.min(remainingHours, result.remainingHoursNeed);
+        result.remainingHoursNeed -= deductHours;
+      }
+      if (deductCount > 0 || deductHours > 0) {
+        const pkgAmount = totalAmount;
+        amountCovered += pkgAmount;
+        result.packageDeductions.push({
+          packageId: pkg.id,
+          packageName: pkg.name,
+          packageType: pkg.type,
+          deductedCount: deductCount,
+          deductedHours: deductHours,
+          deductedAmount: Math.round(pkgAmount * 100) / 100,
+        });
+      }
+    }
+
+    if (result.remainingCountNeed <= 0 && result.remainingHoursNeed <= 0) {
+      break;
+    }
+  }
+
+  result.balanceDeduction = Math.round((totalAmount - amountCovered) * 100) / 100;
+  if (result.balanceDeduction < 0) result.balanceDeduction = 0;
+
+  return result;
+};
+
+const applyPackageDeductions = (
+  _memberId: string,
+  deductions: PackageDeductionDetail[]
+): void => {
+  const packages = getMemberPackages();
+  deductions.forEach((detail) => {
+    const idx = packages.findIndex((p) => p.id === detail.packageId);
+    if (idx !== -1) {
+      packages[idx] = {
+        ...packages[idx],
+        usedCount: packages[idx].usedCount + detail.deductedCount,
+        usedHours: packages[idx].usedHours + detail.deductedHours,
+      };
+    }
+  });
+  saveMemberPackages(packages);
+};
 
 export const settleBooking = (bookingId: string): SettleBookingResult => {
   const bookings = getBookings();
@@ -408,18 +697,66 @@ export const settleBooking = (bookingId: string): SettleBookingResult => {
     return { success: false, message: '场地不存在' };
   }
 
-  const amount = calculateBookingAmount(booking.startTime, booking.endTime, court.type);
+  const totalAmount = calculateBookingAmount(booking.startTime, booking.endTime, court.type);
+  let settleDetails: BookingSettleDetails = {
+    packageDeductions: [],
+    balanceDeduction: totalAmount,
+    totalAmount,
+  };
 
   if (booking.memberId) {
-    const txResult = createMemberTransaction({
-      memberId: booking.memberId,
-      type: 'consume',
-      amount,
-      remark: `${court.name}消费 ${booking.startTime}-${booking.endTime}`,
-      relatedBookingId: booking.id,
-    });
-    if (!txResult.success) {
-      return { success: false, message: txResult.message };
+    const preview = previewBookingDeduction(
+      booking.memberId,
+      court.type,
+      booking.date,
+      booking.startTime,
+      booking.endTime
+    );
+    settleDetails = {
+      packageDeductions: preview.packageDeductions,
+      balanceDeduction: preview.balanceDeduction,
+      totalAmount,
+    };
+
+    if (preview.packageDeductions.length > 0) {
+      applyPackageDeductions(booking.memberId, preview.packageDeductions);
+    }
+
+    if (settleDetails.balanceDeduction > 0) {
+      const member = getMemberById(booking.memberId);
+      if (!member || member.balance < settleDetails.balanceDeduction) {
+        return { success: false, message: `余额不足，还需 ¥${settleDetails.balanceDeduction.toFixed(2)}` };
+      }
+      const txResult = createMemberTransaction({
+        memberId: booking.memberId,
+        type: 'consume',
+        amount: settleDetails.balanceDeduction,
+        remark: `${court.name}消费 ${booking.startTime}-${booking.endTime}${
+          preview.packageDeductions.length > 0 ? '（套餐抵扣后余额补扣）' : ''
+        }`,
+        relatedBookingId: booking.id,
+        packageDeductions: preview.packageDeductions,
+        balanceDeduction: settleDetails.balanceDeduction,
+      });
+      if (!txResult.success) {
+        return { success: false, message: txResult.message };
+      }
+    }
+
+    if (preview.packageDeductions.length > 0) {
+      const totalPackageAmount = preview.packageDeductions.reduce(
+        (sum, d) => sum + d.deductedAmount,
+        0
+      );
+      createMemberTransaction({
+        memberId: booking.memberId,
+        type: 'package_deduct',
+        amount: totalPackageAmount,
+        remark: `${court.name}消费套餐抵扣 ${booking.startTime}-${booking.endTime}`,
+        relatedBookingId: booking.id,
+        packageDeductions: preview.packageDeductions,
+        balanceDeduction: 0,
+      });
     }
   }
 
@@ -427,11 +764,79 @@ export const settleBooking = (bookingId: string): SettleBookingResult => {
     ...booking,
     settled: true,
     settledAt: new Date().toISOString(),
-    settledAmount: amount,
+    settledAmount: totalAmount,
+    settleDetails,
   };
   saveBookings(bookings);
 
-  return { success: true, amount };
+  return { success: true, amount: totalAmount, settleDetails };
+};
+
+// ==================== Package Statistics ====================
+
+export const getTodayPackageConsumption = (memberId?: string) => {
+  const today = getTodayStr();
+  const transactions = getMemberTransactions().filter((t) => {
+    const txDate = new Date(t.createdAt).toISOString().split('T')[0];
+    if (txDate !== today) return false;
+    if (t.type !== 'package_deduct') return false;
+    if (memberId && t.memberId !== memberId) return false;
+    return true;
+  });
+
+  let totalCount = 0;
+  let totalHours = 0;
+  let totalAmount = 0;
+
+  transactions.forEach((t) => {
+    t.packageDeductions?.forEach((d) => {
+      totalCount += d.deductedCount;
+      totalHours += d.deductedHours;
+      totalAmount += d.deductedAmount;
+    });
+  });
+
+  return { totalCount, totalHours: Math.round(totalHours * 100) / 100, totalAmount };
+};
+
+export const getTodayBalanceSupplement = (memberId?: string): number => {
+  const today = getTodayStr();
+  return getMemberTransactions()
+    .filter((t) => {
+      const txDate = new Date(t.createdAt).toISOString().split('T')[0];
+      if (txDate !== today) return false;
+      if (t.type !== 'consume') return false;
+      if (!t.packageDeductions || t.packageDeductions.length === 0) return false;
+      if (memberId && t.memberId !== memberId) return false;
+      return true;
+    })
+    .reduce((sum, t) => sum + (t.balanceDeduction || 0), 0);
+};
+
+export const getExpiringPackagesCount = (days: number = 7): number => {
+  const today = new Date();
+  const threshold = new Date(today);
+  threshold.setDate(today.getDate() + days);
+  const thresholdStr = threshold.toISOString().split('T')[0];
+  const todayStr = getTodayStr();
+
+  return getMemberPackages().filter((p) => {
+    if (getPackageStatus(p) !== 'active') return false;
+    return p.validTo >= todayStr && p.validTo <= thresholdStr;
+  }).length;
+};
+
+export const getMemberExpiringPackages = (memberId: string, days: number = 7): MemberPackage[] => {
+  const today = new Date();
+  const threshold = new Date(today);
+  threshold.setDate(today.getDate() + days);
+  const thresholdStr = threshold.toISOString().split('T')[0];
+  const todayStr = getTodayStr();
+
+  return getPackagesByMember(memberId).filter((p) => {
+    if (getPackageStatus(p) !== 'active') return false;
+    return p.validTo >= todayStr && p.validTo <= thresholdStr;
+  });
 };
 
 // Initialize with sample data if empty
@@ -508,10 +913,16 @@ export const initSampleData = (): void => {
     saveCourts(sampleCourts);
   }
 
+  let memberIds: string[] = [];
   if (getMembers().length === 0) {
+    const id1 = generateId();
+    const id2 = generateId();
+    const id3 = generateId();
+    const id4 = generateId();
+    memberIds = [id1, id2, id3, id4];
     const sampleMembers: Member[] = [
       {
-        id: generateId(),
+        id: id1,
         name: '张三',
         phone: '13800138001',
         level: 'gold',
@@ -522,7 +933,7 @@ export const initSampleData = (): void => {
         note: '黄金会员',
       },
       {
-        id: generateId(),
+        id: id2,
         name: '李四',
         phone: '13800138002',
         level: 'silver',
@@ -532,7 +943,7 @@ export const initSampleData = (): void => {
         status: 'active',
       },
       {
-        id: generateId(),
+        id: id3,
         name: '王五',
         phone: '13800138003',
         level: 'diamond',
@@ -542,7 +953,7 @@ export const initSampleData = (): void => {
         status: 'active',
       },
       {
-        id: generateId(),
+        id: id4,
         name: '赵六',
         phone: '13800138004',
         level: 'normal',
@@ -553,5 +964,82 @@ export const initSampleData = (): void => {
       },
     ];
     saveMembers(sampleMembers);
+  } else {
+    memberIds = getMembers().map((m) => m.id);
+  }
+
+  if (getMemberPackages().length === 0 && memberIds.length >= 2) {
+    const today = new Date();
+    const validFrom = getTodayStr();
+    const validToDate = new Date(today);
+    validToDate.setDate(today.getDate() + 30);
+    const validTo = validToDate.toISOString().split('T')[0];
+    const expiringDate = new Date(today);
+    expiringDate.setDate(today.getDate() + 3);
+    const expiringTo = expiringDate.toISOString().split('T')[0];
+
+    const samplePackages: MemberPackage[] = [
+      {
+        id: generateId(),
+        memberId: memberIds[0],
+        name: '标准场10次卡',
+        type: 'count',
+        totalCount: 10,
+        usedCount: 3,
+        totalHours: 0,
+        usedHours: 0,
+        applicableCourtTypes: ['standard'],
+        applicableTimeSlots: [],
+        validFrom,
+        validTo,
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: generateId(),
+        memberId: memberIds[0],
+        name: '黄金时段20小时卡',
+        type: 'hourly',
+        totalCount: 0,
+        usedCount: 0,
+        totalHours: 20,
+        usedHours: 5,
+        applicableCourtTypes: ['standard', 'vip'],
+        applicableTimeSlots: ['18:00-22:00'],
+        validFrom,
+        validTo: expiringTo,
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: generateId(),
+        memberId: memberIds[1],
+        name: '晨练时段套餐',
+        type: 'time_slot',
+        totalCount: 20,
+        usedCount: 8,
+        totalHours: 40,
+        usedHours: 16,
+        applicableCourtTypes: ['standard', 'training'],
+        applicableTimeSlots: ['06:00-10:00'],
+        validFrom,
+        validTo,
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: generateId(),
+        memberId: memberIds[2],
+        name: 'VIP畅打50小时卡',
+        type: 'hourly',
+        totalCount: 0,
+        usedCount: 0,
+        totalHours: 50,
+        usedHours: 12,
+        applicableCourtTypes: ['vip', 'competition'],
+        applicableTimeSlots: [],
+        validFrom,
+        validTo,
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    saveMemberPackages(samplePackages);
   }
 };

@@ -17,9 +17,19 @@ import {
   CreditCard,
   AlertCircle,
   Users,
+  Ticket,
+  Zap,
+  Banknote,
 } from 'lucide-preact';
 import { getTodayStr, getBookingProgressStatus, getLowestCourtPrice } from '../lib/utils';
-import { getTodayRechargeAmount, getTodayConsumeAmount, getLowBalanceMemberCount } from '../lib/storage';
+import {
+  getTodayRechargeAmount,
+  getTodayConsumeAmount,
+  getLowBalanceMemberCount,
+  getTodayPackageConsumption,
+  getTodayBalanceSupplement,
+  getExpiringPackagesCount,
+} from '../lib/storage';
 
 interface StatsOverviewProps {
   courts: Court[];
@@ -66,6 +76,9 @@ export function StatsOverview({ courts, bookings, inspections, members, transact
     const lowBalanceCount = getLowBalanceMemberCount();
     const activeMembers = members.filter((m) => m.status === 'active').length;
     const totalMemberBalance = members.reduce((sum, m) => sum + m.balance, 0);
+    const todayPackageConsumption = getTodayPackageConsumption();
+    const todayBalanceSupplementAmount = getTodayBalanceSupplement();
+    const expiringPackages = getExpiringPackagesCount(7);
 
     return {
       total: courts.length,
@@ -85,6 +98,9 @@ export function StatsOverview({ courts, bookings, inspections, members, transact
       activeMembers,
       totalMemberBalance,
       totalMembers: members.length,
+      todayPackageConsumption,
+      todayBalanceSupplementAmount,
+      expiringPackages,
     };
   }, [courts, bookings, inspections, members, transactions]);
 
@@ -299,6 +315,64 @@ export function StatsOverview({ courts, bookings, inspections, members, transact
             </div>
           </div>
           <p className="mt-3 text-xs text-gray-500">余额低于 ¥{getLowestCourtPrice()} 的活跃会员</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+        <div className="card p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-emerald-100 text-emerald-600">
+              <Zap className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">今日套餐消耗</p>
+              <p className="text-2xl font-bold text-gray-900">
+                {stats.todayPackageConsumption.totalCount > 0 && (
+                  <span>{stats.todayPackageConsumption.totalCount}次</span>
+                )}
+                {stats.todayPackageConsumption.totalCount > 0 && stats.todayPackageConsumption.totalHours > 0 && (
+                  <span className="text-gray-400 text-sm mx-1">/</span>
+                )}
+                {stats.todayPackageConsumption.totalHours > 0 && (
+                  <span>{stats.todayPackageConsumption.totalHours}h</span>
+                )}
+                {stats.todayPackageConsumption.totalCount === 0 && stats.todayPackageConsumption.totalHours === 0 && (
+                  <span className="text-gray-400 text-base">0</span>
+                )}
+              </p>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-emerald-600">
+            抵扣金额 ¥{stats.todayPackageConsumption.totalAmount.toFixed(2)}
+          </p>
+        </div>
+
+        <div className="card p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-amber-100 text-amber-600">
+              <Banknote className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">今日余额补扣</p>
+              <p className="text-2xl font-bold text-gray-900">
+                ¥{stats.todayBalanceSupplementAmount.toFixed(2)}
+              </p>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-gray-500">套餐不足后从余额扣除</p>
+        </div>
+
+        <div className="card p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-red-100 text-red-600">
+              <Ticket className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">即将到期套餐</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.expiringPackages}</p>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-gray-500">7天内到期的有效套餐</p>
         </div>
       </div>
 
