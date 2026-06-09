@@ -65,6 +65,21 @@ export const getBookings = (): Booking[] => getFromStorage<Booking>(BOOKINGS_KEY
 
 export const saveBookings = (bookings: Booking[]): void => saveToStorage(BOOKINGS_KEY, bookings);
 
+export const isTimeSlotConflict = (
+  courtId: string,
+  date: string,
+  startTime: string,
+  endTime: string,
+  excludeBookingId?: string
+): boolean => {
+  const bookings = getBookings();
+  return bookings.some((b) => {
+    if (b.id === excludeBookingId) return false;
+    if (b.courtId !== courtId || b.date !== date) return false;
+    return !(endTime <= b.startTime || startTime >= b.endTime);
+  });
+};
+
 export const addBooking = (booking: Omit<Booking, 'id' | 'createdAt'>): Booking => {
   const bookings = getBookings();
   const newBooking: Booking = {
@@ -74,14 +89,26 @@ export const addBooking = (booking: Omit<Booking, 'id' | 'createdAt'>): Booking 
   };
   bookings.push(newBooking);
   saveBookings(bookings);
+  updateCourt(booking.courtId, { bookingStatus: 'booked' });
   return newBooking;
 };
 
 export const deleteBooking = (id: string): boolean => {
   const bookings = getBookings();
+  const bookingToDelete = bookings.find((b) => b.id === id);
   const filtered = bookings.filter((b) => b.id !== id);
   if (filtered.length === bookings.length) return false;
   saveBookings(filtered);
+  if (bookingToDelete) {
+    const courtBookings = filtered.filter((b) => b.courtId === bookingToDelete.courtId);
+    if (courtBookings.length === 0) {
+      const courts = getCourts();
+      const court = courts.find((c) => c.id === bookingToDelete.courtId);
+      if (court && court.bookingStatus !== 'disabled' && court.bookingStatus !== 'in_use') {
+        updateCourt(bookingToDelete.courtId, { bookingStatus: 'idle' });
+      }
+    }
+  }
   return true;
 };
 

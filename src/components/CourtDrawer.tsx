@@ -110,8 +110,13 @@ export function CourtDrawer({
               <button className="btn-secondary flex-1" onClick={onEdit}>
                 编辑场地
               </button>
-              <button className="btn-primary flex-1" onClick={onAddBooking}>
-                预订登记
+              <button
+                className="btn-primary flex-1"
+                onClick={onAddBooking}
+                disabled={court.bookingStatus === 'disabled'}
+                title={court.bookingStatus === 'disabled' ? '该场地已停用，无法预订' : ''}
+              >
+                {court.bookingStatus === 'disabled' ? '已停用' : '预订登记'}
               </button>
             </div>
 
@@ -166,8 +171,12 @@ export function CourtDrawer({
             <div className="card p-4">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-semibold text-gray-900">预订记录</h3>
-                <button className="text-sm text-emerald-600 hover:text-emerald-700" onClick={onAddBooking}>
-                  + 新增预订
+                <button
+                  className={`text-sm ${court.bookingStatus === 'disabled' ? 'text-gray-400 cursor-not-allowed' : 'text-emerald-600 hover:text-emerald-700'}`}
+                  onClick={court.bookingStatus === 'disabled' ? undefined : onAddBooking}
+                  disabled={court.bookingStatus === 'disabled'}
+                >
+                  {court.bookingStatus === 'disabled' ? '已停用' : '+ 新增预订'}
                 </button>
               </div>
               {bookings.length === 0 ? (

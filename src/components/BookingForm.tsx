@@ -1,6 +1,7 @@
-import { useState } from 'preact/hooks';
+import { useState, useMemo } from 'preact/hooks';
 import type { Booking, Court } from '../types';
 import { getTodayStr, isDateBeforeToday, isEndTimeBeforeStart } from '../lib/utils';
+import { isTimeSlotConflict } from '../lib/storage';
 
 interface BookingFormProps {
   courts: Court[];
@@ -10,8 +11,23 @@ interface BookingFormProps {
 }
 
 export function BookingForm({ courts, selectedCourtId, onSubmit, onCancel }: BookingFormProps) {
+  const availableCourts = useMemo(
+    () => courts.filter((c) => c.bookingStatus !== 'disabled'),
+    [courts]
+  );
+
+  const getInitialCourtId = () => {
+    if (selectedCourtId) {
+      const selected = courts.find((c) => c.id === selectedCourtId);
+      if (selected && selected.bookingStatus !== 'disabled') {
+        return selectedCourtId;
+      }
+    }
+    return availableCourts[0]?.id || '';
+  };
+
   const [formData, setFormData] = useState({
-    courtId: selectedCourtId || courts[0]?.id || '',
+    courtId: getInitialCourtId(),
     customerName: '',
     customerPhone: '',
     date: getTodayStr(),
@@ -25,6 +41,11 @@ export function BookingForm({ courts, selectedCourtId, onSubmit, onCancel }: Boo
     const newErrors: Record<string, string> = {};
     if (!formData.courtId) {
       newErrors.courtId = '请选择场地';
+    } else {
+      const selectedCourt = courts.find((c) => c.id === formData.courtId);
+      if (selectedCourt?.bookingStatus === 'disabled') {
+        newErrors.courtId = '该场地已停用，无法预订';
+      }
     }
     if (!formData.customerName.trim()) {
       newErrors.customerName = '客户姓名不能为空';
@@ -44,6 +65,14 @@ export function BookingForm({ courts, selectedCourtId, onSubmit, onCancel }: Boo
       newErrors.endTime = '请选择结束时间';
     } else if (formData.startTime && isEndTimeBeforeStart(formData.startTime, formData.endTime)) {
       newErrors.endTime = '结束时间不能早于开始时间';
+    } else if (
+      formData.courtId &&
+      formData.date &&
+      formData.startTime &&
+      formData.endTime &&
+      isTimeSlotConflict(formData.courtId, formData.date, formData.startTime, formData.endTime)
+    ) {
+      newErrors.endTime = '该时段已被预订，请选择其他时间';
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -78,12 +107,15 @@ export function BookingForm({ courts, selectedCourtId, onSubmit, onCancel }: Boo
           onChange={(e) => update('courtId', (e.target as HTMLSelectElement).value)}
         >
           <option value="">请选择场地</option>
-          {courts.map((court) => (
+          {availableCourts.map((court) => (
             <option key={court.id} value={court.id}>
               {court.code} - {court.name}
             </option>
           ))}
         </select>
+        {availableCourts.length === 0 && (
+          <p className="text-yellow-600 text-xs mt-1">暂无可预订的场地</p>
+        )}
         {errors.courtId && <p className="text-red-500 text-xs mt-1">{errors.courtId}</p>}
       </div>
 
