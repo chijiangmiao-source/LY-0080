@@ -1,4 +1,5 @@
 import * as Dialog from '@radix-ui/react-dialog';
+import { useState } from 'preact/hooks';
 import type { Court, Booking, Inspection } from '../types';
 import {
   BOOKING_STATUS_LABEL,
@@ -9,7 +10,7 @@ import {
   BOOKING_PROGRESS_STATUS_LABEL,
 } from '../types';
 import { formatDate, getBookingProgressStatus, getBookingProgressBadgeClass } from '../lib/utils';
-import { X, Lightbulb, Layers, CalendarClock } from 'lucide-preact';
+import { X, Lightbulb, Layers, CalendarClock, ChevronDown, ChevronUp, History } from 'lucide-preact';
 
 interface CourtDrawerProps {
   open: boolean;
@@ -37,6 +38,20 @@ export function CourtDrawer({
   onRescheduleBooking,
 }: CourtDrawerProps) {
   if (!court) return null;
+
+  const [expandedBookingIds, setExpandedBookingIds] = useState<Set<string>>(new Set());
+
+  const toggleBookingExpand = (bookingId: string) => {
+    setExpandedBookingIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(bookingId)) {
+        next.delete(bookingId);
+      } else {
+        next.add(bookingId);
+      }
+      return next;
+    });
+  };
 
   const hasEquipmentWarning =
     court.lightingStatus !== 'normal' || court.floorStatus !== 'normal';
@@ -188,6 +203,8 @@ export function CourtDrawer({
                 <div className="space-y-3">
                   {bookings.map((booking) => {
                     const progressStatus = getBookingProgressStatus(booking);
+                    const isExpanded = expandedBookingIds.has(booking.id);
+                    const hasChanges = booking.changeHistory && booking.changeHistory.length > 0;
                     return (
                       <div key={booking.id} className="border border-gray-100 rounded-md p-3">
                         <div className="flex justify-between items-start">
@@ -229,10 +246,43 @@ export function CourtDrawer({
                           {booking.notes && (
                             <p className="text-gray-500 mt-1">备注：{booking.notes}</p>
                           )}
-                          {booking.changeHistory && booking.changeHistory.length > 0 && (
-                            <p className="text-gray-400 mt-1">已改期 {booking.changeHistory.length} 次</p>
+                          {hasChanges && (
+                            <div className="mt-1">
+                              <button
+                                onClick={() => toggleBookingExpand(booking.id)}
+                                className="text-emerald-600 inline-flex items-center gap-1 text-xs hover:text-emerald-700"
+                              >
+                                <History className="w-3.5 h-3.5" />
+                                已改期 {booking.changeHistory!.length} 次
+                                {isExpanded ? (
+                                  <ChevronUp className="w-3.5 h-3.5" />
+                                ) : (
+                                  <ChevronDown className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            </div>
                           )}
                         </div>
+                        {isExpanded && hasChanges && (
+                          <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
+                            {[...booking.changeHistory!].reverse().map((change) => (
+                              <div key={change.id} className="bg-gray-50 rounded p-2 text-xs text-gray-600 border border-gray-200">
+                                <p className="text-gray-500 text-[11px] mb-1">
+                                  {new Date(change.changedAt).toLocaleString('zh-CN')}
+                                </p>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-red-600">
+                                    {change.previousDate} {change.previousStartTime}-{change.previousEndTime}
+                                  </span>
+                                  <span className="text-gray-400">→</span>
+                                  <span className="text-emerald-600 font-medium">
+                                    {change.newDate} {change.newStartTime}-{change.newEndTime}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     );
                   })}

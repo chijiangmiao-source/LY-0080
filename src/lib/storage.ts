@@ -1,4 +1,5 @@
 import type { Court, Booking, Inspection, BookingChange } from '../types';
+import { getBookingProgressStatus } from './utils';
 
 const COURTS_KEY = 'badminton_courts';
 const BOOKINGS_KEY = 'badminton_bookings';
@@ -89,7 +90,7 @@ export const addBooking = (booking: Omit<Booking, 'id' | 'createdAt'>): Booking 
   };
   bookings.push(newBooking);
   saveBookings(bookings);
-  updateCourt(booking.courtId, { bookingStatus: 'booked' });
+  syncCourtStatusAfterBookingChange(booking.courtId);
   return newBooking;
 };
 
@@ -123,16 +124,9 @@ export const updateBooking = (
   };
   saveBookings(bookings);
 
-  if (originalBooking.courtId !== bookings[index].courtId) {
-    const oldCourtBookings = bookings.filter((b) => b.courtId === originalBooking.courtId && b.id !== id);
-    if (oldCourtBookings.length === 0) {
-      const courts = getCourts();
-      const oldCourt = courts.find((c) => c.id === originalBooking.courtId);
-      if (oldCourt && oldCourt.bookingStatus !== 'disabled' && oldCourt.bookingStatus !== 'in_use') {
-        updateCourt(originalBooking.courtId, { bookingStatus: 'idle' });
-      }
-    }
-    updateCourt(bookings[index].courtId, { bookingStatus: 'booked' });
+  syncCourtStatusAfterBookingChange(originalBooking.courtId);
+  if (bookings[index].courtId !== originalBooking.courtId) {
+    syncCourtStatusAfterBookingChange(bookings[index].courtId);
   }
 
   return bookings[index];
@@ -145,20 +139,39 @@ export const deleteBooking = (id: string): boolean => {
   if (filtered.length === bookings.length) return false;
   saveBookings(filtered);
   if (bookingToDelete) {
-    const courtBookings = filtered.filter((b) => b.courtId === bookingToDelete.courtId);
-    if (courtBookings.length === 0) {
-      const courts = getCourts();
-      const court = courts.find((c) => c.id === bookingToDelete.courtId);
-      if (court && court.bookingStatus !== 'disabled' && court.bookingStatus !== 'in_use') {
-        updateCourt(bookingToDelete.courtId, { bookingStatus: 'idle' });
-      }
-    }
+    syncCourtStatusAfterBookingChange(bookingToDelete.courtId);
   }
   return true;
 };
 
 export const getBookingsByCourt = (courtId: string): Booking[] => {
   return getBookings().filter((b) => b.courtId === courtId);
+};
+
+export const determineCourtBookingStatus = (courtId: string): 'idle' | 'booked' | 'in_use' => {
+  const courtBookings = getBookingsByCourt(courtId);
+  const activeBookings = courtBookings.filter((b) => {
+    const status = getBookingProgressStatus(b);
+    return status === 'upcoming' || status === 'in_progress';
+  });
+
+  if (activeBookings.length === 0) {
+    return 'idle';
+  }
+
+  const hasInProgress = courtBookings.some((b) => getBookingProgressStatus(b) === 'in_progress');
+  return hasInProgress ? 'in_use' : 'booked';
+};
+
+const syncCourtStatusAfterBookingChange = (courtId: string): void => {
+  const courts = getCourts();
+  const court = courts.find((c) => c.id === courtId);
+  if (!court || court.bookingStatus === 'disabled') return;
+
+  const newStatus = determineCourtBookingStatus(courtId);
+  if (court.bookingStatus !== newStatus) {
+    updateCourt(courtId, { bookingStatus: newStatus });
+  }
 };
 
 // Inspections

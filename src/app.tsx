@@ -36,6 +36,9 @@ import {
   Trash2,
   X,
   CalendarClock,
+  ChevronDown,
+  ChevronUp,
+  History,
 } from 'lucide-preact';
 
 type TabValue = 'overview' | 'courts' | 'bookings' | 'inspections';
@@ -70,6 +73,8 @@ export function App() {
 
   const [showRescheduleForm, setShowRescheduleForm] = useState(false);
   const [reschedulingBooking, setReschedulingBooking] = useState<Booking | null>(null);
+
+  const [expandedBookingIds, setExpandedBookingIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     initSampleData();
@@ -187,6 +192,18 @@ export function App() {
     }
     setShowRescheduleForm(false);
     setReschedulingBooking(null);
+  };
+
+  const toggleBookingExpand = (bookingId: string) => {
+    setExpandedBookingIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(bookingId)) {
+        next.delete(bookingId);
+      } else {
+        next.add(bookingId);
+      }
+      return next;
+    });
   };
 
   const handleAddInspection = (courtId?: string) => {
@@ -433,49 +450,103 @@ export function App() {
                     {bookings.map((booking) => {
                       const court = courts.find((c) => c.id === booking.courtId);
                       const progressStatus = getBookingProgressStatus(booking);
+                      const isExpanded = expandedBookingIds.has(booking.id);
+                      const hasChanges = booking.changeHistory && booking.changeHistory.length > 0;
                       return (
-                        <tr key={booking.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 text-sm">
-                            <span className="font-medium text-gray-900">
-                              {court?.name || '已删除'}
-                            </span>
-                            <span className="text-gray-500 ml-1">({court?.code || '-'})</span>
-                          </td>
-                          <td className="px-4 py-3 text-sm">
-                            <div className="text-gray-900 font-medium">{booking.customerName}</div>
-                            <div className="text-gray-500 text-xs">{booking.customerPhone}</div>
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-700">{booking.date}</td>
-                          <td className="px-4 py-3 text-sm text-gray-700">
-                            {booking.startTime} - {booking.endTime}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`badge ${getBookingProgressBadgeClass(progressStatus)}`}>
-                              {BOOKING_PROGRESS_STATUS_LABEL[progressStatus]}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-500 max-w-[200px] truncate">
-                            {booking.notes || '-'}
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <div className="inline-flex items-center gap-3">
-                              <button
-                                className="text-emerald-600 hover:text-emerald-700 text-sm inline-flex items-center gap-1"
-                                onClick={() => handleRescheduleBooking(booking)}
-                              >
-                                <CalendarClock className="w-4 h-4" />
-                                改期
-                              </button>
-                              <button
-                                className="text-red-600 hover:text-red-700 text-sm inline-flex items-center gap-1"
-                                onClick={() => handleCancelBooking(booking.id)}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                                取消
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
+                        <>
+                          <tr key={booking.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm">
+                              <span className="font-medium text-gray-900">
+                                {court?.name || '已删除'}
+                              </span>
+                              <span className="text-gray-500 ml-1">({court?.code || '-'})</span>
+                            </td>
+                            <td className="px-4 py-3 text-sm">
+                              <div className="text-gray-900 font-medium">{booking.customerName}</div>
+                              <div className="text-gray-500 text-xs">{booking.customerPhone}</div>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-700">{booking.date}</td>
+                            <td className="px-4 py-3 text-sm text-gray-700">
+                              {booking.startTime} - {booking.endTime}
+                              {hasChanges && (
+                                <span className="ml-2 text-emerald-600 text-xs">
+                                  <button
+                                    onClick={() => toggleBookingExpand(booking.id)}
+                                    className="inline-flex items-center gap-1 align-middle"
+                                    title="查看变更历史"
+                                  >
+                                    <History className="w-3.5 h-3.5" />
+                                    改期{booking.changeHistory!.length}次
+                                    {isExpanded ? (
+                                      <ChevronUp className="w-3.5 h-3.5" />
+                                    ) : (
+                                      <ChevronDown className="w-3.5 h-3.5" />
+                                    )}
+                                  </button>
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`badge ${getBookingProgressBadgeClass(progressStatus)}`}>
+                                {BOOKING_PROGRESS_STATUS_LABEL[progressStatus]}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-500 max-w-[200px] truncate">
+                              {booking.notes || '-'}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <div className="inline-flex items-center gap-3">
+                                <button
+                                  className="text-emerald-600 hover:text-emerald-700 text-sm inline-flex items-center gap-1"
+                                  onClick={() => handleRescheduleBooking(booking)}
+                                >
+                                  <CalendarClock className="w-4 h-4" />
+                                  改期
+                                </button>
+                                <button
+                                  className="text-red-600 hover:text-red-700 text-sm inline-flex items-center gap-1"
+                                  onClick={() => handleCancelBooking(booking.id)}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                  取消
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                          {isExpanded && hasChanges && (
+                            <tr key={`${booking.id}-history`} className="bg-gray-50">
+                              <td colSpan={7} className="px-4 py-3">
+                                <div className="space-y-2">
+                                  <p className="text-xs font-medium text-gray-600 flex items-center gap-1">
+                                    <History className="w-3.5 h-3.5" />
+                                    变更历史
+                                  </p>
+                                  <div className="space-y-2">
+                                    {[...booking.changeHistory!].reverse().map((change) => (
+                                      <div
+                                        key={change.id}
+                                        className="bg-white border border-gray-200 rounded-md p-3 text-xs text-gray-600"
+                                      >
+                                        <p className="text-gray-500 mb-1">
+                                          {new Date(change.changedAt).toLocaleString('zh-CN')}
+                                        </p>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-red-600">
+                                            {change.previousDate} {change.previousStartTime}-{change.previousEndTime}
+                                          </span>
+                                          <span className="text-gray-400">→</span>
+                                          <span className="text-emerald-600 font-medium">
+                                            {change.newDate} {change.newStartTime}-{change.newEndTime}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </>
                       );
                     })}
                   </tbody>

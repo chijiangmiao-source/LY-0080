@@ -47,7 +47,12 @@ export function StatsOverview({ courts, bookings, inspections }: StatsOverviewPr
 
     const today = getTodayStr();
     const todayBookings = bookings.filter((b) => b.date === today).length;
-    const inProgressCourts = bookings.filter((b) => getBookingProgressStatus(b) === 'in_progress').length;
+    const inProgressCourtSet = new Set(
+      bookings
+        .filter((b) => getBookingProgressStatus(b) === 'in_progress')
+        .map((b) => b.courtId)
+    );
+    const inProgressCourts = inProgressCourtSet.size;
 
     return {
       total: courts.length,
