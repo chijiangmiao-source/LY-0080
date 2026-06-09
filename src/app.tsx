@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'preact/hooks';
 import * as Tabs from '@radix-ui/react-tabs';
 import type { Court, Booking, Inspection, BookingStatus, CourtType } from './types';
-import { BOOKING_STATUS_LABEL, COURT_TYPE_LABEL } from './types';
+import { BOOKING_STATUS_LABEL, COURT_TYPE_LABEL, BOOKING_PROGRESS_STATUS_LABEL } from './types';
 import {
   getCourts,
   addCourt,
@@ -10,6 +10,7 @@ import {
   getBookings,
   addBooking,
   deleteBooking,
+  updateBooking,
   getBookingsByCourt,
   getInspections,
   addInspection,
@@ -20,10 +21,11 @@ import { CourtCard } from './components/CourtCard';
 import { CourtForm } from './components/CourtForm';
 import { CourtDrawer } from './components/CourtDrawer';
 import { BookingForm } from './components/BookingForm';
+import { RescheduleForm } from './components/RescheduleForm';
 import { InspectionForm } from './components/InspectionForm';
 import { Modal } from './components/Modal';
 import { StatsOverview } from './components/StatsOverview';
-import { formatDate } from './lib/utils';
+import { formatDate, getBookingProgressStatus, getBookingProgressBadgeClass } from './lib/utils';
 import {
   Plus,
   Search,
@@ -33,6 +35,7 @@ import {
   ClipboardList,
   Trash2,
   X,
+  CalendarClock,
 } from 'lucide-preact';
 
 type TabValue = 'overview' | 'courts' | 'bookings' | 'inspections';
@@ -64,6 +67,9 @@ export function App() {
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deletingCourt, setDeletingCourt] = useState<Court | null>(null);
+
+  const [showRescheduleForm, setShowRescheduleForm] = useState(false);
+  const [reschedulingBooking, setReschedulingBooking] = useState<Booking | null>(null);
 
   useEffect(() => {
     initSampleData();
@@ -167,6 +173,20 @@ export function App() {
   const handleCancelBooking = (id: string) => {
     deleteBooking(id);
     refreshData();
+  };
+
+  const handleRescheduleBooking = (booking: Booking) => {
+    setReschedulingBooking(booking);
+    setShowRescheduleForm(true);
+  };
+
+  const handleRescheduleSubmit = (data: { date: string; startTime: string; endTime: string }) => {
+    if (reschedulingBooking) {
+      updateBooking(reschedulingBooking.id, data);
+      refreshData();
+    }
+    setShowRescheduleForm(false);
+    setReschedulingBooking(null);
   };
 
   const handleAddInspection = (courtId?: string) => {
@@ -399,6 +419,9 @@ export function App() {
                         时间
                       </th>
                       <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">
+                        状态
+                      </th>
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">
                         备注
                       </th>
                       <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase">
@@ -409,6 +432,7 @@ export function App() {
                   <tbody className="divide-y divide-gray-100">
                     {bookings.map((booking) => {
                       const court = courts.find((c) => c.id === booking.courtId);
+                      const progressStatus = getBookingProgressStatus(booking);
                       return (
                         <tr key={booking.id} className="hover:bg-gray-50">
                           <td className="px-4 py-3 text-sm">
@@ -425,17 +449,31 @@ export function App() {
                           <td className="px-4 py-3 text-sm text-gray-700">
                             {booking.startTime} - {booking.endTime}
                           </td>
+                          <td className="px-4 py-3">
+                            <span className={`badge ${getBookingProgressBadgeClass(progressStatus)}`}>
+                              {BOOKING_PROGRESS_STATUS_LABEL[progressStatus]}
+                            </span>
+                          </td>
                           <td className="px-4 py-3 text-sm text-gray-500 max-w-[200px] truncate">
                             {booking.notes || '-'}
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <button
-                              className="text-red-600 hover:text-red-700 text-sm inline-flex items-center gap-1"
-                              onClick={() => handleCancelBooking(booking.id)}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                              取消
-                            </button>
+                            <div className="inline-flex items-center gap-3">
+                              <button
+                                className="text-emerald-600 hover:text-emerald-700 text-sm inline-flex items-center gap-1"
+                                onClick={() => handleRescheduleBooking(booking)}
+                              >
+                                <CalendarClock className="w-4 h-4" />
+                                改期
+                              </button>
+                              <button
+                                className="text-red-600 hover:text-red-700 text-sm inline-flex items-center gap-1"
+                                onClick={() => handleCancelBooking(booking.id)}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                取消
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -564,6 +602,10 @@ export function App() {
           }
         }}
         onCancelBooking={handleCancelBooking}
+        onRescheduleBooking={(booking) => {
+          setDrawerOpen(false);
+          handleRescheduleBooking(booking);
+        }}
       />
 
       <Modal
@@ -648,6 +690,27 @@ export function App() {
             确认删除
           </button>
         </div>
+      </Modal>
+
+      <Modal
+        open={showRescheduleForm}
+        onClose={() => {
+          setShowRescheduleForm(false);
+          setReschedulingBooking(null);
+        }}
+        title="预订改期/改时"
+      >
+        {reschedulingBooking && (
+          <RescheduleForm
+            booking={reschedulingBooking}
+            courts={courts}
+            onSubmit={handleRescheduleSubmit}
+            onCancel={() => {
+              setShowRescheduleForm(false);
+              setReschedulingBooking(null);
+            }}
+          />
+        )}
       </Modal>
     </div>
   );

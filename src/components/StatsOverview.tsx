@@ -11,7 +11,10 @@ import {
   CalendarCheck,
   ClipboardList,
   AlertTriangle,
+  Play,
+  CalendarDays,
 } from 'lucide-preact';
+import { getTodayStr, getBookingProgressStatus } from '../lib/utils';
 
 interface StatsOverviewProps {
   courts: Court[];
@@ -42,6 +45,10 @@ export function StatsOverview({ courts, bookings, inspections }: StatsOverviewPr
     ).length;
     const pendingInspections = inspections.filter((i) => i.status !== 'resolved').length;
 
+    const today = getTodayStr();
+    const todayBookings = bookings.filter((b) => b.date === today).length;
+    const inProgressCourts = bookings.filter((b) => getBookingProgressStatus(b) === 'in_progress').length;
+
     return {
       total: courts.length,
       idle: idleCourts,
@@ -52,6 +59,8 @@ export function StatsOverview({ courts, bookings, inspections }: StatsOverviewPr
       bookingCount: bookings.length,
       pendingInspections,
       totalInspections: inspections.length,
+      todayBookings,
+      inProgressCourts,
     };
   }, [courts, bookings, inspections]);
 
@@ -131,7 +140,7 @@ export function StatsOverview({ courts, bookings, inspections }: StatsOverviewPr
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <div className="card p-4">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-emerald-100 text-emerald-600">
@@ -160,6 +169,32 @@ export function StatsOverview({ courts, bookings, inspections }: StatsOverviewPr
             </div>
           </div>
           <p className="mt-3 text-xs text-gray-500">累计预订记录数</p>
+        </div>
+
+        <div className="card p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-teal-100 text-teal-600">
+              <CalendarDays className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">今日预订数</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.todayBookings}</p>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-gray-500">当天预订总场次</p>
+        </div>
+
+        <div className="card p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-emerald-100 text-emerald-600">
+              <Play className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">进行中场地数</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.inProgressCourts}</p>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-gray-500">当前正在使用的场地</p>
         </div>
 
         <div className="card p-4">

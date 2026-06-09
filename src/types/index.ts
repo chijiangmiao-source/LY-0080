@@ -3,6 +3,7 @@ export type EquipmentStatus = 'normal' | 'warning' | 'error';
 export type CourtType = 'standard' | 'vip' | 'training' | 'competition';
 export type InspectionStatus = 'pending' | 'processing' | 'resolved';
 export type ProblemType = 'lighting' | 'floor' | 'net' | 'equipment' | 'other';
+export type BookingProgressStatus = 'upcoming' | 'in_progress' | 'ended';
 
 export interface Court {
   id: string;
@@ -16,6 +17,17 @@ export interface Court {
   createdAt: string;
 }
 
+export interface BookingChange {
+  id: string;
+  previousDate: string;
+  previousStartTime: string;
+  previousEndTime: string;
+  newDate: string;
+  newStartTime: string;
+  newEndTime: string;
+  changedAt: string;
+}
+
 export interface Booking {
   id: string;
   courtId: string;
@@ -26,6 +38,7 @@ export interface Booking {
   endTime: string;
   notes?: string;
   createdAt: string;
+  changeHistory?: BookingChange[];
 }
 
 export interface Inspection {
@@ -43,6 +56,12 @@ export const BOOKING_STATUS_LABEL: Record<BookingStatus, string> = {
   booked: '已预订',
   in_use: '使用中',
   disabled: '停用',
+};
+
+export const BOOKING_PROGRESS_STATUS_LABEL: Record<BookingProgressStatus, string> = {
+  upcoming: '即将开始',
+  in_progress: '进行中',
+  ended: '已结束',
 };
 
 export const COURT_TYPE_LABEL: Record<CourtType, string> = {

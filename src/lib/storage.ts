@@ -1,4 +1,4 @@
-import type { Court, Booking, Inspection } from '../types';
+import type { Court, Booking, Inspection, BookingChange } from '../types';
 
 const COURTS_KEY = 'badminton_courts';
 const BOOKINGS_KEY = 'badminton_bookings';
@@ -91,6 +91,51 @@ export const addBooking = (booking: Omit<Booking, 'id' | 'createdAt'>): Booking 
   saveBookings(bookings);
   updateCourt(booking.courtId, { bookingStatus: 'booked' });
   return newBooking;
+};
+
+export const updateBooking = (
+  id: string,
+  updates: { date: string; startTime: string; endTime: string }
+): Booking | null => {
+  const bookings = getBookings();
+  const index = bookings.findIndex((b) => b.id === id);
+  if (index === -1) return null;
+
+  const originalBooking = bookings[index];
+  const changeRecord: BookingChange = {
+    id: generateId(),
+    previousDate: originalBooking.date,
+    previousStartTime: originalBooking.startTime,
+    previousEndTime: originalBooking.endTime,
+    newDate: updates.date,
+    newStartTime: updates.startTime,
+    newEndTime: updates.endTime,
+    changedAt: new Date().toISOString(),
+  };
+
+  const existingHistory = originalBooking.changeHistory || [];
+  bookings[index] = {
+    ...originalBooking,
+    date: updates.date,
+    startTime: updates.startTime,
+    endTime: updates.endTime,
+    changeHistory: [...existingHistory, changeRecord],
+  };
+  saveBookings(bookings);
+
+  if (originalBooking.courtId !== bookings[index].courtId) {
+    const oldCourtBookings = bookings.filter((b) => b.courtId === originalBooking.courtId && b.id !== id);
+    if (oldCourtBookings.length === 0) {
+      const courts = getCourts();
+      const oldCourt = courts.find((c) => c.id === originalBooking.courtId);
+      if (oldCourt && oldCourt.bookingStatus !== 'disabled' && oldCourt.bookingStatus !== 'in_use') {
+        updateCourt(originalBooking.courtId, { bookingStatus: 'idle' });
+      }
+    }
+    updateCourt(bookings[index].courtId, { bookingStatus: 'booked' });
+  }
+
+  return bookings[index];
 };
 
 export const deleteBooking = (id: string): boolean => {
